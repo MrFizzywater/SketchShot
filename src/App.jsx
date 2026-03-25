@@ -82,7 +82,6 @@ const App = () => {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
-          await signInAnonymously(auth);
         }
       } catch (err) { console.error("Auth init failed:", err); }
     };
@@ -280,20 +279,32 @@ const App = () => {
   };
 
   const generateStoryboardFrame = async (shotId) => {
-    setLoadingStates(prev => ({ ...prev, [shotId]: true }));
-    const shot = shots.find(s => s.id === shotId);
-    const charsContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters;
-    const promptText = `A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${charsContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`;
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instances: [{ prompt: promptText }], parameters: { sampleCount: 1 } })
-      });
-      const result = await response.json();
-      updateShot(shotId, 'image', `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`);
-    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [shotId]: false })); }
-  };
+      setLoadingStates(prev => ({ ...prev, [shotId]: true }));
+      const shot = shots.find(s => s.id === shotId);
+      const charsContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters;
+      const promptText = `A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${charsContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`;
+      
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instances: [{ prompt: promptText }], parameters: { sampleCount: 1 } })
+        });
+        
+        // THE FIX: Catch the 404 before it crashes the JSON parser
+        if (!response.ok) {
+          throw new Error(`Google API threw a ${response.status}. The Imagen model might be locked for your account/region.`);
+        }
 
+        const result = await response.json();
+        updateShot(shotId, 'image', `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`);
+      } catch (err) { 
+        console.error(err);
+        alert(`Storyboard Failed: ${err.message}`); // Alert the user instead of crashing
+      } finally { 
+        setLoadingStates(prev => ({ ...prev, [shotId]: false })); 
+      }
+    };
+    
   const generateScript = async () => {
     setLoadingStates(prev => ({ ...prev, script: true }));
     try {
