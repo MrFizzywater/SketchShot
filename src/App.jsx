@@ -5,8 +5,7 @@ import {
   BrainCircuit, Loader2, Quote, Zap, ArrowLeft, ImageIcon, 
   X, Download, Upload, Save, Maximize2, Map, ScrollText, 
   VenetianMask, ChevronUp, ChevronDown, Clapperboard, 
-  UserPlus, ArrowUp, ArrowDown, Cloud, CloudOff, Github, LogOut
-} from 'lucide-react';
+  UserPlus, ArrowUp, ArrowDown, Cloud, CloudOff, GitBranch, LogOut} from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
@@ -423,8 +422,8 @@ const App = () => {
                 <button onClick={() => loginWithProvider('google')} className="flex-1 flex justify-center items-center gap-2 px-3 py-2 text-[10px] font-black bg-zinc-100 hover:bg-white text-zinc-900 rounded-xl transition-all">
                   GOOGLE
                 </button>
-                <button onClick={() => loginWithProvider('github')} className="flex-1 flex justify-center items-center gap-2 px-3 py-2 text-[10px] font-black bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition-all">
-                  <Github size={12} /> GITHUB
+                <button onClick={() => loginWithProvider('github')} className="...">
+                  <GitBranch size={12} /> GITHUB
                 </button>
               </div>
             </div>
