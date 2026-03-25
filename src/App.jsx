@@ -304,7 +304,7 @@ const App = () => {
         setLoadingStates(prev => ({ ...prev, [shotId]: false })); 
       }
     };
-    
+
   const generateScript = async () => {
     setLoadingStates(prev => ({ ...prev, script: true }));
     try {
@@ -471,11 +471,11 @@ const App = () => {
                   </div>
                 </div>
                 <div className="flex gap-2 items-center">
-                  <button onClick={generateScript} disabled={loadingStates.script} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-blue-900/20">
-                    {loadingStates.script ? <Loader2 size={14} className="animate-spin" /> : <ScrollText size={14} />} WRITE SCRIPT
-                  </button>
                   <button onClick={generateAISHots} disabled={loadingStates.genShots} className="flex items-center gap-2 px-6 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-purple-900/20">
                     {loadingStates.genShots ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} BUILD LIST
+                  </button>
+                  <button onClick={generateScript} disabled={loadingStates.script} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-blue-900/20">
+                    {loadingStates.script ? <Loader2 size={14} className="animate-spin" /> : <ScrollText size={14} />} WRITE SCRIPT
                   </button>
                   <button onClick={() => setIsDetailsExpanded(!isDetailsExpanded)} className="p-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-full text-zinc-400 transition-colors border border-zinc-700">
                     {isDetailsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
