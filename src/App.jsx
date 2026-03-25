@@ -68,7 +68,7 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
-  const apiKey = ""; 
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
   const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
   const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
