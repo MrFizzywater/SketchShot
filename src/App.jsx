@@ -5,14 +5,14 @@ import {
   BrainCircuit, Loader2, Quote, Zap, ArrowLeft, ImageIcon, 
   X, Download, Upload, Save, Maximize2, Map, ScrollText, 
   VenetianMask, ChevronUp, ChevronDown, Clapperboard, 
-  UserPlus, ArrowUp, ArrowDown, Cloud, CloudOff, GitBranch, LogOut} from 'lucide-react';
+  UserPlus, ArrowUp, ArrowDown, Cloud, CloudOff, GitBranch, LogOut, Lock
+} from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
 import { 
-  getAuth, signInAnonymously, signInWithCustomToken, 
-  signInWithPopup, GoogleAuthProvider, GithubAuthProvider, 
-  onAuthStateChanged, signOut 
+  getAuth, signInWithCustomToken, signInWithPopup, 
+  GoogleAuthProvider, GithubAuthProvider, onAuthStateChanged, signOut 
 } from 'firebase/auth';
 import { 
   getFirestore, collection, doc, setDoc, onSnapshot 
@@ -45,6 +45,14 @@ const SCENE_TYPES = ['Interior', 'Exterior', 'Studio', 'Green Screen', 'Vehicle'
 const TONES = ['Absurdist', 'Disruptive / Cringe', 'Deadpan', 'Slapstick', 'Satire', 'Surreal', 'Mockumentary', 'Cinematic'];
 
 const App = () => {
+  // --- AUTH STATE ---
+  const [user, setUser] = useState(null);
+  const [authResolved, setAuthResolved] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
+  
+  // A "Real User" is explicitly someone logged in via Google/GitHub, not a lingering anonymous session
+  const isRealUser = user && !user.isAnonymous;
+
   const [sketches, setSketches] = useState([
     { 
       id: '1', title: 'The Hot Dog Suit Incident', sceneType: 'Interior', tone: 'Disruptive / Cringe', characters: 'Greg, The Hot Dog Man, Mourners', props: 'Casket, Mustard, Industrial Zipper, Floral Arrangement',
@@ -52,10 +60,7 @@ const App = () => {
     }
   ]);
   const [activeSketchId, setActiveSketchId] = useState('1');
-  const [shots, setShots] = useState([
-    { id: 's1', sketchId: '1', number: 1, type: 'Wide', subject: 'Establish Funeral Home', action: 'Camera pushes in on the weeping mourners. Greg enters frame left, squeaking.', notes: 'Very grey, very serious.', dialogue: '[SFX: Squeaking of polyester]', fx: false, image: null, locationCaveat: 'Ext. Funeral Home', shotCharacters: ['Greg', 'Mourners'] },
-    { id: 's2', sketchId: '1', number: 2, type: 'Close Up', subject: 'The Zipper Jam', action: 'Greg desperately yanks at the giant mustard-stained zipper.', notes: 'Focus on physical struggle.', dialogue: 'ACTOR: "It\'s a specialized weave, Greg!"', fx: true, image: null, locationCaveat: '', shotCharacters: ['The Hot Dog Man', 'Greg'] }
-  ]);
+  const [shots, setShots] = useState([]);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [viewMode, setViewMode] = useState('storyboard'); 
   const [shootPlan, setShootPlan] = useState([]);
@@ -64,35 +69,27 @@ const App = () => {
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(true);
   const fileInputRef = useRef(null);
 
-  // --- AUTH & CLOUD SYNC STATE ---
-  const [user, setUser] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  
+  // Wire up the Gemini API key from the environment variables
+  const apiKey = ""; 
 
-  const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
-  const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
-  const currentDisplayList = viewMode === 'shoot-plan' && shootPlan.length > 0 ? shootPlan : activeShots;
-  const availableCharacters = activeSketch?.characters ? activeSketch.characters.split(',').map(c => c.trim()).filter(Boolean) : [];
-
-  // --- FIREBASE AUTHENTICATION ---
+  // --- AUTHENTICATION LISTENER ---
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-        }
-      } catch (err) { console.error("Auth init failed:", err); }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+      signInWithCustomToken(auth, __initial_auth_token).catch(console.error);
+    }
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthResolved(true);
+    });
     return () => unsubscribe();
   }, []);
 
   // --- FIRESTORE DATA SYNC (READ) ---
   useEffect(() => {
-    if (!user) return;
+    if (!isRealUser) return;
     
     const sketchesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'sketches');
     const unsubSketches = onSnapshot(sketchesRef, (snap) => {
@@ -105,16 +102,67 @@ const App = () => {
     const unsubShots = onSnapshot(shotsRef, (snap) => {
       if (!snap.empty && !dataLoaded) {
         setShots(snap.docs.map(d => ({id: d.id, ...d.data()})));
-        setDataLoaded(true); // Prevent constant re-rendering from local edits overwriting
+        setDataLoaded(true); 
       }
     }, (err) => console.error("Shots sync error:", err));
 
     return () => { unsubSketches(); unsubShots(); };
-  }, [user, dataLoaded]);
+  }, [isRealUser, user, dataLoaded]);
+
+  const loginWithProvider = async (providerName) => {
+    const provider = providerName === 'google' ? new GoogleAuthProvider() : new GithubAuthProvider();
+    try { await signInWithPopup(auth, provider); } 
+    catch (err) { console.error("Login failed:", err); }
+  };
+
+  // ==========================================
+  // AUTH GUARD: REQUIRE LOGIN OR GUEST MODE
+  // ==========================================
+  if (!authResolved) {
+    return <div className="h-screen bg-zinc-950 flex items-center justify-center"><Loader2 className="animate-spin text-orange-500" size={32} /></div>;
+  }
+
+  if (!isRealUser && !isGuest) {
+    return (
+      <div className="h-screen bg-zinc-950 flex items-center justify-center text-zinc-100 font-sans selection:bg-orange-500/30 p-6">
+        <div className="max-w-sm w-full p-10 bg-zinc-900/50 border border-zinc-800 rounded-[3rem] text-center space-y-10 backdrop-blur-xl shadow-2xl">
+          <div className="space-y-4">
+            <div className="w-20 h-20 bg-zinc-800 rounded-full flex items-center justify-center mx-auto border-4 border-zinc-900 shadow-inner">
+              <Camera className="text-orange-500" size={32} />
+            </div>
+            <div>
+              <h1 className="text-3xl font-black tracking-tighter">SKETCHSHOT</h1>
+              <p className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase mt-1">Production Rig</p>
+            </div>
+          </div>
+          
+          <div className="space-y-3">
+            <button onClick={() => loginWithProvider('google')} className="w-full flex justify-center items-center gap-3 px-4 py-4 text-xs font-black bg-zinc-100 hover:bg-white text-zinc-900 rounded-2xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5">
+              CONTINUE WITH GOOGLE
+            </button>
+            <button onClick={() => loginWithProvider('github')} className="w-full flex justify-center items-center gap-3 px-4 py-4 text-xs font-black bg-zinc-800 hover:bg-zinc-700 text-white rounded-2xl transition-all border border-zinc-700 hover:border-zinc-500 shadow-lg hover:shadow-xl hover:-translate-y-0.5">
+              <GitBranch size={16} /> CONTINUE WITH GITHUB
+            </button>
+            <button onClick={() => setIsGuest(true)} className="w-full flex justify-center items-center gap-3 px-4 py-4 text-xs font-black bg-transparent hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 rounded-2xl transition-all mt-2">
+              CONTINUE AS GUEST (Manual Mode)
+            </button>
+          </div>
+          
+          <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-bold">AI Features Require Login</p>
+        </div>
+      </div>
+    );
+  }
+  // ==========================================
+
+  const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
+  const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
+  const currentDisplayList = viewMode === 'shoot-plan' && shootPlan.length > 0 ? shootPlan : activeShots;
+  const availableCharacters = activeSketch?.characters ? activeSketch.characters.split(',').map(c => c.trim()).filter(Boolean) : [];
 
   // --- FIRESTORE DATA SYNC (WRITE) ---
   const pushToCloud = async () => {
-    if (!user) return;
+    if (!isRealUser) return;
     setIsSyncing(true);
     try {
       for (const s of sketches) {
@@ -125,12 +173,6 @@ const App = () => {
       }
     } catch (err) { console.error("Cloud push failed:", err); }
     setTimeout(() => setIsSyncing(false), 1000);
-  };
-
-  const loginWithProvider = async (providerName) => {
-    const provider = providerName === 'google' ? new GoogleAuthProvider() : new GithubAuthProvider();
-    try { await signInWithPopup(auth, provider); } 
-    catch (err) { console.error("Login failed:", err); }
   };
 
   // --- CRUD OPERATIONS ---
@@ -241,7 +283,7 @@ const App = () => {
       try {
         const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
         if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
         });
         const result = await response.json();
@@ -279,31 +321,29 @@ const App = () => {
   };
 
   const generateStoryboardFrame = async (shotId) => {
-      setLoadingStates(prev => ({ ...prev, [shotId]: true }));
-      const shot = shots.find(s => s.id === shotId);
-      const charsContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters;
-      const promptText = `A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${charsContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`;
+    setLoadingStates(prev => ({ ...prev, [shotId]: true }));
+    const shot = shots.find(s => s.id === shotId);
+    const charsContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters;
+    const promptText = `A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${charsContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`;
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instances: [{ prompt: promptText }], parameters: { sampleCount: 1 } })
+      });
       
-      try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ instances: [{ prompt: promptText }], parameters: { sampleCount: 1 } })
-        });
-        
-        // THE FIX: Catch the 404 before it crashes the JSON parser
-        if (!response.ok) {
-          throw new Error(`Google API threw a ${response.status}. The Imagen model might be locked for your account/region.`);
-        }
-
-        const result = await response.json();
-        updateShot(shotId, 'image', `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`);
-      } catch (err) { 
-        console.error(err);
-        alert(`Storyboard Failed: ${err.message}`); // Alert the user instead of crashing
-      } finally { 
-        setLoadingStates(prev => ({ ...prev, [shotId]: false })); 
+      if (!response.ok) {
+        throw new Error(`Google API threw a ${response.status}. The Imagen model might be locked for your account/region.`);
       }
-    };
+
+      const result = await response.json();
+      updateShot(shotId, 'image', `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`);
+    } catch (err) { 
+      console.error(err);
+      alert(`Storyboard Failed: ${err.message}`); 
+    } finally { 
+      setLoadingStates(prev => ({ ...prev, [shotId]: false })); 
+    }
+  };
 
   const generateScript = async () => {
     setLoadingStates(prev => ({ ...prev, script: true }));
@@ -408,37 +448,26 @@ const App = () => {
           <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Sketch', sceneType: 'Interior', tone: 'Absurdist', characters: '', props: '', hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW SKETCH</button>
         </nav>
 
-        {/* AUTHENTICATION & CLOUD SYNC PANEL */}
+        {/* CLOUD SYNC & LOGOUT PANEL */}
         <div className="p-4 border-t border-zinc-800 space-y-3 bg-zinc-950/50">
           <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-            {user && !user.isAnonymous ? <Cloud className="text-green-500" size={14} /> : <CloudOff className="text-zinc-600" size={14} />}
-            Cloud Rig
+            <Cloud className="text-green-500" size={14} /> Cloud Rig
           </div>
           
-          {user && !user.isAnonymous ? (
-            <div className="space-y-2">
-              <div className="text-xs text-zinc-400 truncate flex items-center justify-between">
-                <span>{user.email || 'GitHub User'}</span>
+          <div className="space-y-2">
+            <div className="text-xs text-zinc-400 truncate flex items-center justify-between">
+              <span>{isRealUser ? user.email : 'Guest Viewer'}</span>
+              {isRealUser ? (
                 <button onClick={() => signOut(auth)} className="text-red-400 hover:text-red-300" title="Sign Out"><LogOut size={14} /></button>
-              </div>
-              <button onClick={pushToCloud} disabled={isSyncing} className="w-full flex justify-center items-center gap-2 px-3 py-2 text-[10px] font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50">
-                {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                SYNC TO CLOUD
-              </button>
+              ) : (
+                <button onClick={() => { setIsGuest(false); setAuthResolved(true); }} className="text-orange-400 hover:text-orange-300 font-bold" title="Log In">LOG IN</button>
+              )}
             </div>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-[10px] text-zinc-500 leading-tight">Sign in to sync your shot lists to your self-hosted Firebase DB.</p>
-              <div className="flex gap-2">
-                <button onClick={() => loginWithProvider('google')} className="flex-1 flex justify-center items-center gap-2 px-3 py-2 text-[10px] font-black bg-zinc-100 hover:bg-white text-zinc-900 rounded-xl transition-all">
-                  GOOGLE
-                </button>
-                <button onClick={() => loginWithProvider('github')} className="...">
-                  <GitBranch size={12} /> GITHUB
-                </button>
-              </div>
-            </div>
-          )}
+            <button onClick={pushToCloud} disabled={isSyncing || !isRealUser} className="w-full flex justify-center items-center gap-2 px-3 py-2 text-[10px] font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none">
+              {isSyncing ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Save size={12} />)}
+              SYNC TO CLOUD
+            </button>
+          </div>
 
           <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/50">
             <button onClick={exportSnapshot} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 rounded-lg transition-all"><Download size={10} /> BACKUP</button>
@@ -461,8 +490,8 @@ const App = () => {
                   <input value={activeSketch?.title} onChange={(e) => updateSketch(activeSketchId, 'title', e.target.value)} className="bg-transparent text-5xl font-black focus:outline-none w-full tracking-tighter" placeholder="Title..." />
                   <div className="flex gap-4 mt-2">
                     <button onClick={() => setViewMode('storyboard')} className={`text-[10px] font-black px-4 py-1.5 rounded-full ${viewMode === 'storyboard' ? 'bg-zinc-100 text-zinc-950' : 'text-zinc-500'}`}>STORYBOARD</button>
-                    <button onClick={() => shootPlan.length > 0 ? setViewMode('shoot-plan') : optimizeShootOrder()} className={`text-[10px] font-black px-4 py-1.5 rounded-full flex items-center gap-2 ${viewMode === 'shoot-plan' ? 'bg-orange-500 text-white' : 'text-zinc-500'}`}>
-                      {loadingStates.optimizing ? <Loader2 size={10} className="animate-spin" /> : <Zap size={10} />} SHOOT PLAN
+                    <button onClick={() => shootPlan.length > 0 ? setViewMode('shoot-plan') : optimizeShootOrder()} disabled={!isRealUser && shootPlan.length === 0} className={`text-[10px] font-black px-4 py-1.5 rounded-full flex items-center gap-2 ${viewMode === 'shoot-plan' ? 'bg-orange-500 text-white' : 'text-zinc-500'} disabled:opacity-50`}>
+                      {loadingStates.optimizing ? <Loader2 size={10} className="animate-spin" /> : (!isRealUser && shootPlan.length === 0 ? <Lock size={10} /> : <Zap size={10} />)} SHOOT PLAN
                     </button>
                     <button onClick={() => setViewMode('script')} className={`text-[10px] font-black px-4 py-1.5 rounded-full ${viewMode === 'script' ? 'bg-blue-500 text-white' : 'text-zinc-500'}`}>
                       SCRIPT
@@ -471,11 +500,11 @@ const App = () => {
                   </div>
                 </div>
                 <div className="flex gap-2 items-center">
-                  <button onClick={generateAISHots} disabled={loadingStates.genShots} className="flex items-center gap-2 px-6 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-purple-900/20">
-                    {loadingStates.genShots ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} BUILD LIST
+                  <button onClick={generateAISHots} disabled={loadingStates.genShots || !isRealUser} className="flex items-center gap-2 px-6 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-purple-900/20">
+                    {loadingStates.genShots ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <Sparkles size={14} />)} BUILD LIST
                   </button>
-                  <button onClick={generateScript} disabled={loadingStates.script} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-blue-900/20">
-                    {loadingStates.script ? <Loader2 size={14} className="animate-spin" /> : <ScrollText size={14} />} WRITE SCRIPT
+                  <button onClick={generateScript} disabled={loadingStates.script || !isRealUser} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-blue-900/20">
+                    {loadingStates.script ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <ScrollText size={14} />)} WRITE SCRIPT
                   </button>
                   <button onClick={() => setIsDetailsExpanded(!isDetailsExpanded)} className="p-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-full text-zinc-400 transition-colors border border-zinc-700">
                     {isDetailsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -497,21 +526,21 @@ const App = () => {
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between">
                         <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> The Hook</span>
-                        <button onClick={() => generateNarrativeBeat('hook')} className="p-1 hover:bg-orange-500/20 rounded transition-colors"><Sparkles size={12} className="text-orange-500" /></button>
+                        <button onClick={() => generateNarrativeBeat('hook')} disabled={!isRealUser} className="p-1 hover:bg-orange-500/20 rounded transition-colors disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Sparkles size={12} className="text-orange-500" />}</button>
                       </label>
                       <textarea value={activeSketch?.hook} onChange={(e) => updateSketch(activeSketchId, 'hook', e.target.value)} className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none min-h-[80px] resize-none" />
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center justify-between">
                         <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> The Escalation</span>
-                        <button onClick={() => generateNarrativeBeat('escalation')} className="p-1 hover:bg-purple-500/20 rounded transition-colors"><Sparkles size={12} className="text-purple-500" /></button>
+                        <button onClick={() => generateNarrativeBeat('escalation')} disabled={!isRealUser} className="p-1 hover:bg-purple-500/20 rounded transition-colors disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-purple-500" /> : <Sparkles size={12} className="text-purple-500" />}</button>
                       </label>
                       <textarea value={activeSketch?.escalation} onChange={(e) => updateSketch(activeSketchId, 'escalation', e.target.value)} className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none min-h-[80px] resize-none" />
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-green-500 uppercase tracking-widest flex items-center justify-between">
                         <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-green-500 rounded-full" /> The Ending</span>
-                        <button onClick={() => generateNarrativeBeat('ending')} className="p-1 hover:bg-green-500/20 rounded transition-colors"><Sparkles size={12} className="text-green-500" /></button>
+                        <button onClick={() => generateNarrativeBeat('ending')} disabled={!isRealUser} className="p-1 hover:bg-green-500/20 rounded transition-colors disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-green-500" /> : <Sparkles size={12} className="text-green-500" />}</button>
                       </label>
                       <textarea value={activeSketch?.ending} onChange={(e) => updateSketch(activeSketchId, 'ending', e.target.value)} className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none min-h-[80px] resize-none" />
                     </div>
@@ -569,7 +598,7 @@ const App = () => {
                             <div className="text-center p-6">
                               {loadingStates[shot.id] ? <Loader2 className="animate-spin text-purple-500 mx-auto" size={32} /> : (
                                 <><ImageIcon className="text-zinc-800 mx-auto mb-3" size={40} />
-                                <button onClick={() => generateStoryboardFrame(shot.id)} className="text-[10px] font-black text-zinc-500 hover:text-purple-400 border border-zinc-800 px-4 py-2 rounded-full flex items-center gap-2"><Sparkles size={10} /> VISUAL</button></>
+                                <button onClick={() => generateStoryboardFrame(shot.id)} disabled={!isRealUser} className="text-[10px] font-black text-zinc-500 hover:text-purple-400 border border-zinc-800 px-4 py-2 rounded-full flex items-center gap-2 disabled:opacity-50 disabled:hover:text-zinc-500">{!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />} VISUAL</button></>
                               )}
                             </div>
                           )}
@@ -610,7 +639,7 @@ const App = () => {
                         
                         <div className="space-y-2">
                           <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-                            <button onClick={() => generateTextAssist(shot.id, 'action', 'Director blocking physical comedy.', `Shot Subject: ${shot.subject}`)} className="p-1 hover:bg-orange-500/20 rounded"><Clapperboard size={12} className="text-orange-500" /></button> Action / Blocking
+                            <button onClick={() => generateTextAssist(shot.id, 'action', 'Director blocking physical comedy.', `Shot Subject: ${shot.subject}`)} disabled={!isRealUser} className="p-1 hover:bg-orange-500/20 rounded disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Clapperboard size={12} className="text-orange-500" />}</button> Action / Blocking
                           </div>
                           <textarea value={shot.action || ''} onChange={(e) => updateShot(shot.id, 'action', e.target.value)} className="w-full bg-zinc-950/50 rounded-2xl p-4 text-xs text-zinc-300 min-h-[60px] focus:outline-none border border-zinc-800/50 focus:border-orange-500/50 resize-y" />
                         </div>
@@ -618,13 +647,13 @@ const App = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div className="space-y-2">
                             <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-                              <button onClick={() => generateTextAssist(shot.id, 'dialogue', 'Writer drafting dialogue.', `Subject: ${shot.subject}, Action: ${shot.action}`)} className="p-1 hover:bg-purple-500/20 rounded"><Quote size={12} className="text-purple-500" /></button> Dialogue / Improv
+                              <button onClick={() => generateTextAssist(shot.id, 'dialogue', 'Writer drafting dialogue.', `Subject: ${shot.subject}, Action: ${shot.action}`)} disabled={!isRealUser} className="p-1 hover:bg-purple-500/20 rounded disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-purple-500" /> : <Quote size={12} className="text-purple-500" />}</button> Dialogue / Improv
                             </div>
                             <textarea value={shot.dialogue || ''} onChange={(e) => updateShot(shot.id, 'dialogue', e.target.value)} className="w-full bg-zinc-950/50 rounded-2xl p-4 text-xs text-zinc-200 min-h-[100px] focus:outline-none border border-zinc-800/50 focus:border-purple-500/50 resize-y" />
                           </div>
                           <div className="space-y-2">
                             <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-                              <button onClick={() => generateTextAssist(shot.id, 'notes', 'DP advising on camera/light.', `Type: ${shot.type}, Subject: ${shot.subject}`)} className="p-1 hover:bg-blue-500/20 rounded"><Wand2 size={12} className="text-blue-500" /></button> Director Notes
+                              <button onClick={() => generateTextAssist(shot.id, 'notes', 'DP advising on camera/light.', `Type: ${shot.type}, Subject: ${shot.subject}`)} disabled={!isRealUser} className="p-1 hover:bg-blue-500/20 rounded disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-blue-500" /> : <Wand2 size={12} className="text-blue-500" />}</button> Director Notes
                             </div>
                             <textarea value={shot.notes || ''} onChange={(e) => updateShot(shot.id, 'notes', e.target.value)} className="w-full bg-zinc-950/50 rounded-2xl p-4 text-xs text-zinc-400 min-h-[100px] focus:outline-none border border-zinc-800/50 focus:border-blue-500/50 resize-y italic" />
                           </div>
