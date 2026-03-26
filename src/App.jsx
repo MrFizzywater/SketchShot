@@ -79,7 +79,6 @@ const App = () => {
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(window.innerWidth > 768);
   const [visiblePromptId, setVisiblePromptId] = useState(null);
   
-  // NEW: State for the custom delete confirmation modal
   const [sketchToDelete, setSketchToDelete] = useState(null);
   
   const fileInputRef = useRef(null);
@@ -97,7 +96,6 @@ const App = () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         await signInWithCustomToken(auth, __initial_auth_token).catch(console.error);
       } else {
-        // Silently catch the anonymous auth failure so it doesn't break the app
         await signInAnonymously(auth).catch(() => {});
       }
     };
@@ -134,7 +132,6 @@ const App = () => {
         if (!snap.empty) {
           const loaded = snap.docs.map(d => ({id: d.id, ...d.data()}));
           setSketches(loaded);
-          // Align the active viewport with the newly downloaded cloud IDs so shots don't disappear
           setActiveSketchId(prevId => {
             const exists = loaded.find(s => s.id === prevId);
             return exists ? prevId : loaded[0].id;
@@ -277,11 +274,10 @@ const App = () => {
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
-        // Draw to an off-screen canvas to crush the file size
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
-        const MAX_WIDTH = 800; // Standard storyboard width
+        const MAX_WIDTH = 800; 
 
         if (width > MAX_WIDTH) {
           height = Math.round((height * MAX_WIDTH) / width);
@@ -294,7 +290,6 @@ const App = () => {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Compress down to a 70% quality JPEG
         const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
         updateShot(shotId, 'image', compressedBase64);
       };
@@ -404,6 +399,7 @@ const App = () => {
     }
   };
 
+  // --- UPGRADED AI ENGINE: Bumping to the Pro tier for heavier reasoning tasks ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
     if (!apiKey) throw new Error("API Key is missing.");
     const maxRetries = 5; let delay = 2000; 
@@ -413,7 +409,8 @@ const App = () => {
         const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
         if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
         
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+        // UPGRADED ENDPOINT
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${apiKey}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
         });
         
@@ -514,13 +511,17 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, script: false })); }
   };
 
+  // THE YES, AND FIX: Using context to build on existing inputs
   const generateTextAssist = async (shotId, field, rolePrompt, contextPrompt) => {
     setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: true }));
     const shot = shots.find(s => s.id === shotId);
     try {
       const charContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc || n).join(', ') : richCharactersContext;
-      const prompt = `Scene: ${formattedSceneHeading}\n${contextPrompt}\nCharacters in shot: ${charContext}\nCurrent text: ${shot[field] || '[Empty]'}`;
-      const newText = await callGemini(prompt, `${rolePrompt} Keep it under 2 sentences. Punch it up if text exists.`, false);
+      const existing = shot[field] ? `CURRENT TEXT (DO NOT ERASE, ESCALATE THIS): "${shot[field]}"` : `CURRENT TEXT: [Empty]`;
+      const prompt = `Scene: ${formattedSceneHeading}\n${contextPrompt}\nCharacters in shot: ${charContext}\n${existing}`;
+      
+      const newText = await callGemini(prompt, `${rolePrompt} Apply the 'Yes, And...' rule of improv comedy. If current text exists, keep its core facts (wardrobe, physical traits, props) and punch it up/escalate it. Keep it under 2 sentences.`, false);
+      
       if (newText) updateShot(shotId, field, newText.trim());
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: false })); }
   };
@@ -535,16 +536,19 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [beatType]: false })); }
   };
 
+  // THE YES, AND FIX: Preserving existing character flaws
   const generateCharDesc = async (charId) => {
     setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: true }));
     const char = activeProfiles.find(c => c.id === charId);
     try {
-      const prompt = `Scene: ${formattedSceneHeading}\nSketch Hook: ${activeSketch.hook}\nCharacter Name: ${char.name}\nWrite a 1-2 sentence absurd, highly specific character description, vibe, or fatal flaw for them. Think disruptive/cringe comedy.`;
+      const existing = char.desc ? `CURRENT DETAILS (YES, AND... THESE): "${char.desc}"\n` : '';
+      const prompt = `Scene: ${formattedSceneHeading}\nSketch Hook: ${activeSketch.hook}\nCharacter Name: ${char.name}\n${existing}Task: Write a 1-2 sentence absurd, highly specific character description, vibe, or fatal flaw. If current details exist, KEEP them and ESCALATE them. Think disruptive/cringe comedy.`;
       const newDesc = await callGemini(prompt, `Expert comedy writer (${activeSketch.tone || 'comedic'} humor).`, false);
       if (newDesc) updateChar(charId, 'desc', newDesc.trim());
     } catch(err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: false })); }
   };
 
+  // THE FIX: Allow Colored Pencil output in the image generation prompt
   const getShotPrompt = (shot) => {
     const charContext = shot.shotCharacters?.length > 0 
       ? shot.shotCharacters.map(n => {
@@ -555,7 +559,7 @@ const App = () => {
 
     const location = shot.locationCaveat || formattedSceneHeading;
     
-    let prompt = `Black and white graphite pencil storyboard sketch. A ${shot.type} shot of ${shot.subject}. Location: ${location}. `;
+    let prompt = `Rough storyboard sketch, mixed media graphite and colored pencil. A ${shot.type} shot of ${shot.subject}. Location: ${location}. `;
     if (shot.action) prompt += `Action: ${shot.action} `;
     if (charContext) prompt += `Featuring: ${charContext}. `;
     if (shot.notes) prompt += `Visual Notes: ${shot.notes}. `;
