@@ -44,7 +44,6 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchshot-app';
 
 const SHOT_TYPES = ['Wide', 'Medium', 'Close Up', 'POV', 'Over the Shoulder', 'Insert', 'Drone', 'Tracking'];
-const SCENE_TYPES = ['Interior', 'Exterior', 'Studio', 'Green Screen', 'Vehicle', 'Found Footage'];
 const TONES = ['Absurdist', 'Disruptive / Cringe', 'Deadpan', 'Slapstick', 'Satire', 'Surreal', 'Mockumentary', 'Cinematic'];
 
 const App = () => {
@@ -56,7 +55,9 @@ const App = () => {
 
   const [sketches, setSketches] = useState([
     { 
-      id: '1', title: 'The Hot Dog Suit Incident', sceneType: 'Interior', tone: 'Disruptive / Cringe', 
+      id: '1', title: 'The Hot Dog Suit Incident', 
+      settingType: 'INT.', location: 'FUNERAL HOME', timeOfDay: 'DAY',
+      tone: 'Disruptive / Cringe', 
       characters: '', // Legacy string field, kept for backward compatibility
       characterProfiles: [
         { id: 'c1', name: 'Greg', desc: 'Sweaty, deeply defensive. Wearing a full-body hot dog suit with a broken industrial zipper.' },
@@ -175,8 +176,10 @@ const App = () => {
   const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
   const currentDisplayList = viewMode === 'shoot-plan' && shootPlan.length > 0 ? shootPlan : activeShots;
   
+  // Assemble the Master Scene Heading formatting
+  const formattedSceneHeading = `${activeSketch.settingType || 'INT.'} ${activeSketch.location || activeSketch.sceneType || 'LOCATION'} - ${activeSketch.timeOfDay || 'DAY'}`;
+
   // --- CHARACTER BIBLE DATA HANDLING ---
-  // Gracefully migrate legacy comma-separated characters to the new Profile structure on the fly
   const activeProfiles = activeSketch.characterProfiles || (activeSketch.characters ? activeSketch.characters.split(',').map((c, i) => ({ id: `migrated-${i}`, name: c.trim(), desc: '' })).filter(c => c.name) : []);
   const availableCharacters = activeProfiles.map(c => c.name);
   const richCharactersContext = activeProfiles.map(c => `${c.name}${c.desc ? ` (${c.desc})` : ''}`).join(' | ');
@@ -249,7 +252,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "1.3", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "1.4", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -277,7 +280,7 @@ const App = () => {
   const downloadShootPlan = () => {
     if (!shootPlan || shootPlan.length === 0) return;
     const safeTitle = activeSketch?.title?.toUpperCase() || 'UNTITLED';
-    let planText = `SHOOT PLAN: ${safeTitle}\n=========================================\n\nSCENE: ${activeSketch?.sceneType || 'N/A'}\nCHARACTERS: ${availableCharacters.join(', ') || 'N/A'}\nPROPS: ${activeSketch?.props || 'N/A'}\n\n=========================================\n\n`;
+    let planText = `SHOOT PLAN: ${safeTitle}\n=========================================\n\nSCENE: ${formattedSceneHeading}\nCHARACTERS: ${availableCharacters.join(', ') || 'N/A'}\nPROPS: ${activeSketch?.props || 'N/A'}\n\n=========================================\n\n`;
     shootPlan.forEach((shot, index) => {
       planText += `${index + 1}. [${shot.type.toUpperCase()}] ${shot.subject.toUpperCase()}\n`;
       if (shot.locationCaveat) planText += `   Location: ${shot.locationCaveat}\n`;
@@ -335,8 +338,10 @@ const App = () => {
   const generateAISHots = async () => {
     setLoadingStates(prev => ({ ...prev, genShots: true }));
     try {
-      const systemPrompt = `Expert comedy director. Generate JSON array of 8 shots: "type", "subject", "action", "notes", "dialogue", "shotCharacters" (array of strings selected from the provided sketch characters).`;
-      const prompt = `TONE: ${activeSketch.tone}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch.hook}\nESCALATION: ${activeSketch.escalation}\nENDING: ${activeSketch.ending}`;
+      // FIX 1: Enforce a strict enum for the "type" field so React's <select> doesn't panic and default to 'Wide'
+      const typeList = SHOT_TYPES.join(', ');
+      const systemPrompt = `Expert comedy director. Generate JSON array of exactly 8 shots. Use these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "shotCharacters" (array of strings).`;
+      const prompt = `TONE: ${activeSketch.tone}\nSCENE: ${formattedSceneHeading}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch.hook}\nESCALATION: ${activeSketch.escalation}\nENDING: ${activeSketch.ending}`;
       const newShotsData = await callGemini(prompt, systemPrompt, true);
       if (newShotsData) {
         setShots([...shots, ...newShotsData.map((s, idx) => ({ 
@@ -351,7 +356,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, optimizing: true }));
     try {
       const systemPrompt = `Expert 1st AD. Reorder shots into most efficient SHOOT ORDER. Group by Location Caveats, Shot Types, and active Characters. Return JSON array of objects with 'id' and 'reason'.`;
-      const prompt = `Scene: ${activeSketch.title}\nShots: ${activeShots.map(s => `ID: ${s.id}, Type: ${s.type}, Subject: ${s.subject}, Location: ${s.locationCaveat || 'Base'}, Chars: ${(s.shotCharacters||[]).join(',')}`).join('\n')}`;
+      const prompt = `Scene: ${activeSketch.title} (${formattedSceneHeading})\nShots: ${activeShots.map(s => `ID: ${s.id}, Type: ${s.type}, Subject: ${s.subject}, Location: ${s.locationCaveat || 'Base'}, Chars: ${(s.shotCharacters||[]).join(',')}`).join('\n')}`;
       const optimizedIds = await callGemini(prompt, systemPrompt, true);
       if (optimizedIds) {
         setShootPlan(optimizedIds.map((item, idx) => ({ ...activeShots.find(s => s.id === item.id), shootOrderNumber: idx + 1, optimizationReason: item.reason })));
@@ -364,7 +369,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, script: true }));
     try {
       const systemPrompt = `You are an expert comedy writer specializing in ${activeSketch.tone} humor. Turn this shot list and outline into a formatted script. Write in PLAIN TEXT standard screenplay format. CRITICAL: DO NOT use any HTML tags like <center> or <b>. Use ALL CAPS for scene headings and character names. Use standard line breaks and spacing to format action lines and dialogue.`;
-      const prompt = `Title: ${activeSketch.title}\nTone: ${activeSketch.tone}\nCharacter Profiles: ${richCharactersContext}\nProps: ${activeSketch.props}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}\n\nShot List:\n${activeShots.map(s => `Shot ${s.number} (${s.type}): ${s.subject}\nAction: ${s.action}\nNotes: ${s.notes}\nDialogue: ${s.dialogue}`).join('\n\n')}`;
+      const prompt = `Title: ${activeSketch.title}\nTone: ${activeSketch.tone}\nScene Heading: ${formattedSceneHeading}\nCharacter Profiles: ${richCharactersContext}\nProps: ${activeSketch.props}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}\n\nShot List:\n${activeShots.map(s => `Shot ${s.number} (${s.type}): ${s.subject}\nAction: ${s.action}\nNotes: ${s.notes}\nDialogue: ${s.dialogue}`).join('\n\n')}`;
       const scriptContent = await callGemini(prompt, systemPrompt, false);
       if (scriptContent) {
         updateSketch(activeSketchId, 'script', scriptContent);
@@ -378,7 +383,7 @@ const App = () => {
     const shot = shots.find(s => s.id === shotId);
     try {
       const charContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc || n).join(', ') : richCharactersContext;
-      const prompt = `${contextPrompt}\nCharacters in shot: ${charContext}\nCurrent text: ${shot[field] || '[Empty]'}`;
+      const prompt = `Scene: ${formattedSceneHeading}\n${contextPrompt}\nCharacters in shot: ${charContext}\nCurrent text: ${shot[field] || '[Empty]'}`;
       const newText = await callGemini(prompt, `${rolePrompt} Keep it under 2 sentences. Punch it up if text exists.`, false);
       if (newText) updateShot(shotId, field, newText.trim());
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: false })); }
@@ -388,7 +393,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, [beatType]: true }));
     try {
       const systemPrompt = `Brilliant comedy writer (${activeSketch.tone || 'comedic'} humor). Provide a punchy, creative ${beatType} for the sketch. Keep it under 3 sentences. Punch it up if text exists.`;
-      const prompt = `Title: ${activeSketch.title}\nCharacter Profiles: ${richCharactersContext}\nCurrent Hook: ${activeSketch.hook}\nCurrent Escalation: ${activeSketch.escalation}\nCurrent Ending: ${activeSketch.ending}\nTask: Write/Improve the ${beatType.toUpperCase()}.`;
+      const prompt = `Title: ${activeSketch.title}\nScene Heading: ${formattedSceneHeading}\nCharacter Profiles: ${richCharactersContext}\nCurrent Hook: ${activeSketch.hook}\nCurrent Escalation: ${activeSketch.escalation}\nCurrent Ending: ${activeSketch.ending}\nTask: Write/Improve the ${beatType.toUpperCase()}.`;
       const newBeat = await callGemini(prompt, systemPrompt, false);
       if (newBeat) updateSketch(activeSketchId, beatType, newBeat.trim());
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [beatType]: false })); }
@@ -398,7 +403,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: true }));
     const char = activeProfiles.find(c => c.id === charId);
     try {
-      const prompt = `Sketch Hook: ${activeSketch.hook}\nCharacter Name: ${char.name}\nWrite a 1-2 sentence absurd, highly specific character description, vibe, or fatal flaw for them. Think disruptive/cringe comedy.`;
+      const prompt = `Scene: ${formattedSceneHeading}\nSketch Hook: ${activeSketch.hook}\nCharacter Name: ${char.name}\nWrite a 1-2 sentence absurd, highly specific character description, vibe, or fatal flaw for them. Think disruptive/cringe comedy.`;
       const newDesc = await callGemini(prompt, `Expert comedy writer (${activeSketch.tone || 'comedic'} humor).`, false);
       if (newDesc) updateChar(charId, 'desc', newDesc.trim());
     } catch(err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: false })); }
@@ -416,7 +421,7 @@ const App = () => {
             <div className="text-left md:text-right text-[10px] font-bold uppercase">{new Date().toLocaleDateString()}</div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 border-b border-black pb-4 text-sm">
-            <p><strong>TYPE:</strong> {activeSketch.sceneType}</p>
+            <p><strong>SCENE:</strong> {formattedSceneHeading}</p>
             <p><strong>CHARACTERS:</strong> {availableCharacters.join(', ') || 'N/A'}</p>
             <p className="md:col-span-2"><strong>PROPS:</strong> {activeSketch.props || 'None'}</p>
           </div>
@@ -481,7 +486,7 @@ const App = () => {
               <FileText size={16} className="shrink-0" /> <span className="truncate flex-1 font-medium text-sm">{sketch.title || 'Untitled'}</span>
             </button>
           ))}
-          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Sketch', sceneType: 'Interior', tone: 'Absurdist', characters: '', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW SKETCH</button>
+          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Sketch', settingType: 'INT.', location: 'LOCATION', timeOfDay: 'DAY', tone: 'Absurdist', characters: '', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW SKETCH</button>
         </nav>
 
         {/* CLOUD SYNC & LOGOUT PANEL */}
@@ -556,7 +561,7 @@ const App = () => {
 
               {!isDetailsExpanded && (
                 <div className="flex flex-wrap items-center gap-3 md:gap-4 text-[10px] md:text-xs font-bold text-zinc-500 mt-4 md:mt-6 border-t border-zinc-800/50 pt-4">
-                  <span className="text-orange-500 flex items-center gap-1 shrink-0"><Map size={12}/> {activeSketch?.sceneType || 'No Location'}</span>
+                  <span className="text-orange-500 flex items-center gap-1 shrink-0"><Map size={12}/> {formattedSceneHeading}</span>
                   <span className="text-purple-400 flex items-center gap-1 shrink-0"><VenetianMask size={12}/> {activeSketch?.tone || 'No Tone'}</span>
                   <span className="text-green-400 truncate max-w-[150px] sm:max-w-sm flex items-center gap-1"><UserPlus size={12}/> {availableCharacters.join(', ') || 'No Characters'}</span>
                 </div>
@@ -588,15 +593,31 @@ const App = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800 w-full">
-                    <div className="space-y-1"><span className="text-[9px] font-black text-zinc-600 uppercase">Scene Type</span><input value={activeSketch?.sceneType} onChange={(e) => updateSketch(activeSketchId, 'sceneType', e.target.value)} className="w-full bg-transparent text-sm focus:outline-none font-bold" /></div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800 w-full">
+                    {/* FIX 2: Slick 3-part Scene Heading Builder */}
+                    <div className="space-y-1 sm:col-span-2">
+                      <span className="text-[9px] font-black text-zinc-600 uppercase">Scene Heading</span>
+                      <div className="flex bg-zinc-950/50 rounded-xl border border-zinc-800 focus-within:border-orange-500/50 overflow-hidden shadow-inner">
+                        <select value={activeSketch?.settingType || 'INT.'} onChange={(e) => updateSketch(activeSketchId, 'settingType', e.target.value)} className="bg-zinc-900 border-r border-zinc-800 text-sm font-bold text-orange-500 p-2 focus:outline-none cursor-pointer text-center w-20">
+                          <option>INT.</option><option>EXT.</option><option>I/E.</option>
+                        </select>
+                        <input value={activeSketch?.location !== undefined ? activeSketch.location : (activeSketch?.sceneType || '')} onChange={(e) => updateSketch(activeSketchId, 'location', e.target.value)} placeholder="LOCATION..." className="flex-1 bg-transparent text-sm font-black p-2 focus:outline-none uppercase w-full" />
+                        <span className="text-zinc-700 font-black p-2 select-none">-</span>
+                        <select value={activeSketch?.timeOfDay || 'DAY'} onChange={(e) => updateSketch(activeSketchId, 'timeOfDay', e.target.value)} className="bg-zinc-900 border-l border-zinc-800 text-sm font-bold text-blue-500 p-2 focus:outline-none cursor-pointer text-center w-24">
+                          <option>DAY</option><option>NIGHT</option><option>DAWN</option><option>DUSK</option><option>CONT.</option>
+                        </select>
+                      </div>
+                    </div>
                     <div className="space-y-1">
                       <span className="text-[9px] font-black text-zinc-600 uppercase flex items-center gap-1"><VenetianMask size={10}/> Tone</span>
-                      <select value={activeSketch?.tone} onChange={(e) => updateSketch(activeSketchId, 'tone', e.target.value)} className="w-full bg-transparent text-sm focus:outline-none font-bold cursor-pointer [&>option]:bg-zinc-900">
+                      <select value={activeSketch?.tone} onChange={(e) => updateSketch(activeSketchId, 'tone', e.target.value)} className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-2.5 text-sm focus:outline-none font-bold cursor-pointer [&>option]:bg-zinc-900">
                         {TONES.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
-                    <div className="space-y-1"><span className="text-[9px] font-black text-zinc-600 uppercase">Key Props</span><input value={activeSketch?.props} onChange={(e) => updateSketch(activeSketchId, 'props', e.target.value)} className="w-full bg-transparent text-sm focus:outline-none font-bold italic" /></div>
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-black text-zinc-600 uppercase">Key Props</span>
+                      <input value={activeSketch?.props} onChange={(e) => updateSketch(activeSketchId, 'props', e.target.value)} className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-2 text-sm focus:outline-none font-bold italic h-10" />
+                    </div>
                   </div>
 
                   {/* --- NEW CHARACTER BIBLE PANEL --- */}
@@ -670,9 +691,9 @@ const App = () => {
                                 <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-xl text-left relative animate-in fade-in zoom-in-95 duration-200 shadow-xl">
                                   <button onClick={() => setVisiblePromptId(null)} className="absolute top-2 right-2 p-1 text-zinc-500 hover:text-white bg-zinc-800 rounded-full"><X size={10} /></button>
                                   <p className="text-[9px] text-zinc-400 mb-2 font-mono pr-4 h-24 overflow-y-auto leading-relaxed select-all">
-                                    {`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc ? `${n} (${activeProfiles.find(p => p.name === n).desc})` : n).join(', ') : richCharactersContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`}
+                                    {`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || formattedSceneHeading}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc ? `${n} (${activeProfiles.find(p => p.name === n).desc})` : n).join(', ') : richCharactersContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`}
                                   </p>
-                                  <button onClick={() => copyPrompt(`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc ? `${n} (${activeProfiles.find(p => p.name === n).desc})` : n).join(', ') : richCharactersContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`)} className="w-full bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-black py-2 rounded flex items-center justify-center gap-1 transition-colors"><Copy size={10} /> COPY PROMPT</button>
+                                  <button onClick={() => copyPrompt(`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || formattedSceneHeading}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc ? `${n} (${activeProfiles.find(p => p.name === n).desc})` : n).join(', ') : richCharactersContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`)} className="w-full bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-black py-2 rounded flex items-center justify-center gap-1 transition-colors"><Copy size={10} /> COPY PROMPT</button>
                                 </div>
                               ) : (
                                 <div className="flex flex-col items-center gap-3">
