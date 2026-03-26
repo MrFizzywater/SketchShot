@@ -56,21 +56,25 @@ const App = () => {
 
   const [sketches, setSketches] = useState([
     { 
-      id: '1', title: 'The Hot Dog Suit Incident', sceneType: 'Interior', tone: 'Disruptive / Cringe', characters: 'Greg, The Hot Dog Man, Mourners', props: 'Casket, Mustard, Industrial Zipper, Floral Arrangement',
+      id: '1', title: 'The Hot Dog Suit Incident', sceneType: 'Interior', tone: 'Disruptive / Cringe', 
+      characters: '', // Legacy string field, kept for backward compatibility
+      characterProfiles: [
+        { id: 'c1', name: 'Greg', desc: 'Sweaty, deeply defensive. Wearing a full-body hot dog suit with a broken industrial zipper.' },
+        { id: 'c2', name: 'The Hot Dog Man', desc: 'A rival mascot who takes his job way too seriously.' },
+        { id: 'c3', name: 'Mourners', desc: 'Just trying to grieve. Very confused by the mustard.' }
+      ],
+      props: 'Casket, Mustard, Industrial Zipper, Floral Arrangement',
       hook: 'Main character arrives at a somber funeral wearing a full-body hot dog costume.', escalation: 'He claims he can\'t take it off because of a "zipper tragedy" and starts getting defensive about the mustard stains.', ending: 'The pallbearers realize the casket is also shaped like a giant bun.', script: ''
     }
   ]);
   const [activeSketchId, setActiveSketchId] = useState('1');
   const [shots, setShots] = useState([]);
-  const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768); // Auto-close sidebar on mobile boot
+  const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
   const [viewMode, setViewMode] = useState('storyboard'); 
   const [shootPlan, setShootPlan] = useState([]);
   const [loadingStates, setLoadingStates] = useState({});
   const [zoomedImage, setZoomedImage] = useState(null);
-  
-  // FIX 1: Auto-collapse the massive details header on mobile boot so you start at the shot list
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(window.innerWidth > 768);
-  
   const [visiblePromptId, setVisiblePromptId] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -94,19 +98,11 @@ const App = () => {
   // --- THE CALL SHEET (USER PRESENCE TRACKER) ---
   useEffect(() => {
     if (!isRealUser) return;
-    
     const trackPresence = async () => {
       try {
         const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
-        await setDoc(userRef, {
-          email: user.email,
-          displayName: user.displayName || 'Unknown Crew',
-          lastSeen: new Date().toISOString(),
-          uid: user.uid
-        }, { merge: true });
-      } catch (err) {
-        console.error("Presence tracker failed silently:", err);
-      }
+        await setDoc(userRef, { email: user.email, displayName: user.displayName || 'Unknown Crew', lastSeen: new Date().toISOString(), uid: user.uid }, { merge: true });
+      } catch (err) { console.error("Presence tracker failed silently:", err); }
     };
     trackPresence();
   }, [isRealUser, user]);
@@ -114,7 +110,6 @@ const App = () => {
   // --- FIRESTORE DATA SYNC (READ) ---
   useEffect(() => {
     if (!isRealUser) return;
-    
     const sketchesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'sketches');
     const unsubSketches = onSnapshot(sketchesRef, (snap) => {
       if (!snap.empty && !dataLoaded) setSketches(snap.docs.map(d => ({id: d.id, ...d.data()})));
@@ -133,8 +128,7 @@ const App = () => {
 
   const loginWithProvider = async (providerName) => {
     const provider = providerName === 'google' ? new GoogleAuthProvider() : new GithubAuthProvider();
-    try { await signInWithPopup(auth, provider); } 
-    catch (err) { console.error("Login failed:", err); }
+    try { await signInWithPopup(auth, provider); } catch (err) { console.error("Login failed:", err); }
   };
 
   // ==========================================
@@ -180,7 +174,12 @@ const App = () => {
   const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
   const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
   const currentDisplayList = viewMode === 'shoot-plan' && shootPlan.length > 0 ? shootPlan : activeShots;
-  const availableCharacters = activeSketch?.characters ? activeSketch.characters.split(',').map(c => c.trim()).filter(Boolean) : [];
+  
+  // --- CHARACTER BIBLE DATA HANDLING ---
+  // Gracefully migrate legacy comma-separated characters to the new Profile structure on the fly
+  const activeProfiles = activeSketch.characterProfiles || (activeSketch.characters ? activeSketch.characters.split(',').map((c, i) => ({ id: `migrated-${i}`, name: c.trim(), desc: '' })).filter(c => c.name) : []);
+  const availableCharacters = activeProfiles.map(c => c.name);
+  const richCharactersContext = activeProfiles.map(c => `${c.name}${c.desc ? ` (${c.desc})` : ''}`).join(' | ');
 
   const pushToCloud = async () => {
     if (!isRealUser) return;
@@ -205,6 +204,11 @@ const App = () => {
   const updateSketch = (id, field, value) => setSketches(sketches.map(s => s.id === id ? { ...s, [field]: value } : s));
   const updateShot = (id, field, value) => setShots(shots.map(s => s.id === id ? { ...s, [field]: value } : s));
   
+  // --- CHARACTER BIBLE CRUD ---
+  const addCharacter = () => updateSketch(activeSketchId, 'characterProfiles', [...activeProfiles, { id: Date.now().toString(), name: 'New Character', desc: '' }]);
+  const updateChar = (charId, field, value) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.map(p => p.id === charId ? { ...p, [field]: value } : p));
+  const removeChar = (charId) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.filter(p => p.id !== charId));
+
   const handleImageUpload = (shotId, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -214,15 +218,11 @@ const App = () => {
   };
 
   const copyPrompt = (text) => {
-    try {
-      navigator.clipboard.writeText(text);
-    } catch (err) {
+    try { navigator.clipboard.writeText(text); } 
+    catch (err) {
       const textArea = document.createElement("textarea");
-      textArea.value = text;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
+      textArea.value = text; document.body.appendChild(textArea);
+      textArea.select(); document.execCommand('copy'); document.body.removeChild(textArea);
     }
     setVisiblePromptId(null); 
   };
@@ -249,11 +249,10 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "1.2", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "1.3", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
+    const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -278,7 +277,7 @@ const App = () => {
   const downloadShootPlan = () => {
     if (!shootPlan || shootPlan.length === 0) return;
     const safeTitle = activeSketch?.title?.toUpperCase() || 'UNTITLED';
-    let planText = `SHOOT PLAN: ${safeTitle}\n=========================================\n\nSCENE: ${activeSketch?.sceneType || 'N/A'}\nCHARACTERS: ${activeSketch?.characters || 'N/A'}\nPROPS: ${activeSketch?.props || 'N/A'}\n\n=========================================\n\n`;
+    let planText = `SHOOT PLAN: ${safeTitle}\n=========================================\n\nSCENE: ${activeSketch?.sceneType || 'N/A'}\nCHARACTERS: ${availableCharacters.join(', ') || 'N/A'}\nPROPS: ${activeSketch?.props || 'N/A'}\n\n=========================================\n\n`;
     shootPlan.forEach((shot, index) => {
       planText += `${index + 1}. [${shot.type.toUpperCase()}] ${shot.subject.toUpperCase()}\n`;
       if (shot.locationCaveat) planText += `   Location: ${shot.locationCaveat}\n`;
@@ -292,8 +291,7 @@ const App = () => {
     });
     const blob = new Blob([planText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url; link.download = `SketchShot_ShootPlan.txt`;
+    const link = document.createElement('a'); link.href = url; link.download = `SketchShot_ShootPlan.txt`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -301,17 +299,14 @@ const App = () => {
     if (!activeSketch?.script) return;
     const blob = new Blob([activeSketch.script], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url; link.download = `SketchShot_Script.txt`;
+    const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Script.txt`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   const downloadImage = (imageUrl, shotNumber) => {
-    if (imageUrl.startsWith('http')) {
-      window.open(imageUrl, '_blank');
-    } else {
-      const link = document.createElement('a');
-      link.href = imageUrl; link.download = `SketchShot_Storyboard_Shot_${shotNumber}.png`; link.click();
+    if (imageUrl.startsWith('http')) { window.open(imageUrl, '_blank'); } 
+    else {
+      const link = document.createElement('a'); link.href = imageUrl; link.download = `SketchShot_Storyboard_Shot_${shotNumber}.png`; link.click();
     }
   };
 
@@ -336,11 +331,12 @@ const App = () => {
     }
   };
 
+  // --- AI TOOLING ---
   const generateAISHots = async () => {
     setLoadingStates(prev => ({ ...prev, genShots: true }));
     try {
       const systemPrompt = `Expert comedy director. Generate JSON array of 8 shots: "type", "subject", "action", "notes", "dialogue", "shotCharacters" (array of strings selected from the provided sketch characters).`;
-      const prompt = `TONE: ${activeSketch.tone}\nCHARACTERS AVAILABLE: ${activeSketch.characters}\nHOOK: ${activeSketch.hook}\nESCALATION: ${activeSketch.escalation}\nENDING: ${activeSketch.ending}`;
+      const prompt = `TONE: ${activeSketch.tone}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch.hook}\nESCALATION: ${activeSketch.escalation}\nENDING: ${activeSketch.ending}`;
       const newShotsData = await callGemini(prompt, systemPrompt, true);
       if (newShotsData) {
         setShots([...shots, ...newShotsData.map((s, idx) => ({ 
@@ -368,7 +364,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, script: true }));
     try {
       const systemPrompt = `You are an expert comedy writer specializing in ${activeSketch.tone} humor. Turn this shot list and outline into a formatted script. Write in PLAIN TEXT standard screenplay format. CRITICAL: DO NOT use any HTML tags like <center> or <b>. Use ALL CAPS for scene headings and character names. Use standard line breaks and spacing to format action lines and dialogue.`;
-      const prompt = `Title: ${activeSketch.title}\nTone: ${activeSketch.tone}\nCharacters: ${activeSketch.characters}\nProps: ${activeSketch.props}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}\n\nShot List:\n${activeShots.map(s => `Shot ${s.number} (${s.type}): ${s.subject}\nAction: ${s.action}\nNotes: ${s.notes}\nDialogue: ${s.dialogue}`).join('\n\n')}`;
+      const prompt = `Title: ${activeSketch.title}\nTone: ${activeSketch.tone}\nCharacter Profiles: ${richCharactersContext}\nProps: ${activeSketch.props}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}\n\nShot List:\n${activeShots.map(s => `Shot ${s.number} (${s.type}): ${s.subject}\nAction: ${s.action}\nNotes: ${s.notes}\nDialogue: ${s.dialogue}`).join('\n\n')}`;
       const scriptContent = await callGemini(prompt, systemPrompt, false);
       if (scriptContent) {
         updateSketch(activeSketchId, 'script', scriptContent);
@@ -381,7 +377,8 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: true }));
     const shot = shots.find(s => s.id === shotId);
     try {
-      const prompt = `${contextPrompt}\nCharacters in shot: ${(shot.shotCharacters||[]).join(', ')}\nCurrent text: ${shot[field] || '[Empty]'}`;
+      const charContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc || n).join(', ') : richCharactersContext;
+      const prompt = `${contextPrompt}\nCharacters in shot: ${charContext}\nCurrent text: ${shot[field] || '[Empty]'}`;
       const newText = await callGemini(prompt, `${rolePrompt} Keep it under 2 sentences. Punch it up if text exists.`, false);
       if (newText) updateShot(shotId, field, newText.trim());
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: false })); }
@@ -391,10 +388,20 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, [beatType]: true }));
     try {
       const systemPrompt = `Brilliant comedy writer (${activeSketch.tone || 'comedic'} humor). Provide a punchy, creative ${beatType} for the sketch. Keep it under 3 sentences. Punch it up if text exists.`;
-      const prompt = `Title: ${activeSketch.title}\nCharacters: ${activeSketch.characters}\nCurrent Hook: ${activeSketch.hook}\nCurrent Escalation: ${activeSketch.escalation}\nCurrent Ending: ${activeSketch.ending}\nTask: Write/Improve the ${beatType.toUpperCase()}.`;
+      const prompt = `Title: ${activeSketch.title}\nCharacter Profiles: ${richCharactersContext}\nCurrent Hook: ${activeSketch.hook}\nCurrent Escalation: ${activeSketch.escalation}\nCurrent Ending: ${activeSketch.ending}\nTask: Write/Improve the ${beatType.toUpperCase()}.`;
       const newBeat = await callGemini(prompt, systemPrompt, false);
       if (newBeat) updateSketch(activeSketchId, beatType, newBeat.trim());
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [beatType]: false })); }
+  };
+
+  const generateCharDesc = async (charId) => {
+    setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: true }));
+    const char = activeProfiles.find(c => c.id === charId);
+    try {
+      const prompt = `Sketch Hook: ${activeSketch.hook}\nCharacter Name: ${char.name}\nWrite a 1-2 sentence absurd, highly specific character description, vibe, or fatal flaw for them. Think disruptive/cringe comedy.`;
+      const newDesc = await callGemini(prompt, `Expert comedy writer (${activeSketch.tone || 'comedic'} humor).`, false);
+      if (newDesc) updateChar(charId, 'desc', newDesc.trim());
+    } catch(err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: false })); }
   };
 
   if (viewMode === 'print') {
@@ -410,7 +417,7 @@ const App = () => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 border-b border-black pb-4 text-sm">
             <p><strong>TYPE:</strong> {activeSketch.sceneType}</p>
-            <p><strong>CHARACTERS:</strong> {activeSketch.characters || 'N/A'}</p>
+            <p><strong>CHARACTERS:</strong> {availableCharacters.join(', ') || 'N/A'}</p>
             <p className="md:col-span-2"><strong>PROPS:</strong> {activeSketch.props || 'None'}</p>
           </div>
           <div className="space-y-2 text-sm">
@@ -474,7 +481,7 @@ const App = () => {
               <FileText size={16} className="shrink-0" /> <span className="truncate flex-1 font-medium text-sm">{sketch.title || 'Untitled'}</span>
             </button>
           ))}
-          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Sketch', sceneType: 'Interior', tone: 'Absurdist', characters: '', props: '', hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW SKETCH</button>
+          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Sketch', sceneType: 'Interior', tone: 'Absurdist', characters: '', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW SKETCH</button>
         </nav>
 
         {/* CLOUD SYNC & LOGOUT PANEL */}
@@ -512,7 +519,6 @@ const App = () => {
         </button>
 
         <div className="flex-1 overflow-y-auto w-full">
-          {/* FIX 2: Make header relative on mobile so it scrolls out of the way, keeping it sticky on desktop. Solid background on mobile prevents text bleed. */}
           <header className="p-4 md:p-8 border-b border-zinc-800 bg-zinc-950 md:bg-zinc-950/90 md:backdrop-blur-xl relative md:sticky top-0 z-20 w-full shrink-0">
             <div className="max-w-6xl mx-auto">
               
@@ -552,7 +558,7 @@ const App = () => {
                 <div className="flex flex-wrap items-center gap-3 md:gap-4 text-[10px] md:text-xs font-bold text-zinc-500 mt-4 md:mt-6 border-t border-zinc-800/50 pt-4">
                   <span className="text-orange-500 flex items-center gap-1 shrink-0"><Map size={12}/> {activeSketch?.sceneType || 'No Location'}</span>
                   <span className="text-purple-400 flex items-center gap-1 shrink-0"><VenetianMask size={12}/> {activeSketch?.tone || 'No Tone'}</span>
-                  <span className="text-green-400 truncate max-w-[150px] sm:max-w-sm flex items-center gap-1"><UserPlus size={12}/> {activeSketch?.characters || 'No Characters'}</span>
+                  <span className="text-green-400 truncate max-w-[150px] sm:max-w-sm flex items-center gap-1"><UserPlus size={12}/> {availableCharacters.join(', ') || 'No Characters'}</span>
                 </div>
               )}
 
@@ -582,7 +588,7 @@ const App = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800 w-full">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800 w-full">
                     <div className="space-y-1"><span className="text-[9px] font-black text-zinc-600 uppercase">Scene Type</span><input value={activeSketch?.sceneType} onChange={(e) => updateSketch(activeSketchId, 'sceneType', e.target.value)} className="w-full bg-transparent text-sm focus:outline-none font-bold" /></div>
                     <div className="space-y-1">
                       <span className="text-[9px] font-black text-zinc-600 uppercase flex items-center gap-1"><VenetianMask size={10}/> Tone</span>
@@ -590,9 +596,36 @@ const App = () => {
                         {TONES.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
-                    <div className="space-y-1"><span className="text-[9px] font-black text-zinc-600 uppercase flex items-center gap-1"><UserPlus size={10}/> Characters</span><input value={activeSketch?.characters} onChange={(e) => updateSketch(activeSketchId, 'characters', e.target.value)} className="w-full bg-transparent text-sm focus:outline-none font-bold" /></div>
                     <div className="space-y-1"><span className="text-[9px] font-black text-zinc-600 uppercase">Key Props</span><input value={activeSketch?.props} onChange={(e) => updateSketch(activeSketchId, 'props', e.target.value)} className="w-full bg-transparent text-sm focus:outline-none font-bold italic" /></div>
                   </div>
+
+                  {/* --- NEW CHARACTER BIBLE PANEL --- */}
+                  <div className="pt-6 border-t border-zinc-800/50 mt-6 w-full">
+                    <div className="flex justify-between items-center mb-4">
+                      <label className="text-[10px] font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 bg-green-500 rounded-full" /> Character Bible
+                      </label>
+                      <button onClick={addCharacter} className="text-[10px] font-black text-zinc-500 hover:text-green-400 flex items-center gap-1 transition-colors"><Plus size={10} /> ADD CHARACTER</button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {activeProfiles.map(char => (
+                        <div key={char.id} className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-3 relative group transition-all hover:border-zinc-700">
+                          <button onClick={() => removeChar(char.id)} className="absolute top-3 right-3 p-1.5 bg-zinc-950/50 rounded-lg text-zinc-600 hover:text-red-400 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity border border-zinc-800"><Trash2 size={12} /></button>
+                          <div className="flex items-center gap-2 pr-8">
+                             <UserPlus size={14} className="text-green-500/50" />
+                             <input value={char.name} onChange={(e) => updateChar(char.id, 'name', e.target.value)} placeholder="Character Name" className="bg-transparent text-sm font-black focus:outline-none text-zinc-200 w-full" />
+                          </div>
+                          <div className="relative">
+                            <textarea value={char.desc} onChange={(e) => updateChar(char.id, 'desc', e.target.value)} placeholder="Vibe, wardrobe, fatal flaw..." className="w-full bg-zinc-950/50 rounded-xl p-3 text-xs text-zinc-400 resize-none focus:outline-none border border-zinc-800/50 focus:border-green-500/30 h-20" />
+                            <button onClick={() => generateCharDesc(char.id)} disabled={!isRealUser || loadingStates[`char-${char.id}`]} className="absolute bottom-2 right-2 p-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-green-400 transition-colors disabled:opacity-50" title="Generate character flaw">
+                              {loadingStates[`char-${char.id}`] ? <Loader2 size={10} className="animate-spin text-green-500" /> : (!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />)}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* --- END CHARACTER BIBLE --- */}
                 </div>
               )}
             </div>
@@ -637,9 +670,9 @@ const App = () => {
                                 <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-xl text-left relative animate-in fade-in zoom-in-95 duration-200 shadow-xl">
                                   <button onClick={() => setVisiblePromptId(null)} className="absolute top-2 right-2 p-1 text-zinc-500 hover:text-white bg-zinc-800 rounded-full"><X size={10} /></button>
                                   <p className="text-[9px] text-zinc-400 mb-2 font-mono pr-4 h-24 overflow-y-auto leading-relaxed select-all">
-                                    {`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`}
+                                    {`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc ? `${n} (${activeProfiles.find(p => p.name === n).desc})` : n).join(', ') : richCharactersContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`}
                                   </p>
-                                  <button onClick={() => copyPrompt(`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`)} className="w-full bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-black py-2 rounded flex items-center justify-center gap-1 transition-colors"><Copy size={10} /> COPY PROMPT</button>
+                                  <button onClick={() => copyPrompt(`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc ? `${n} (${activeProfiles.find(p => p.name === n).desc})` : n).join(', ') : richCharactersContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`)} className="w-full bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-black py-2 rounded flex items-center justify-center gap-1 transition-colors"><Copy size={10} /> COPY PROMPT</button>
                                 </div>
                               ) : (
                                 <div className="flex flex-col items-center gap-3">
