@@ -18,8 +18,10 @@ import {
   getFirestore, collection, doc, setDoc, onSnapshot 
 } from 'firebase/firestore';
 
-// --- FIREBASE INITIALIZATION ---
+// --- ENVIRONMENT INITIALIZATION & SAFE KEY EXTRACTION ---
 let firebaseConfig = {};
+let globalGeminiKey = "";
+
 if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 } else {
@@ -32,6 +34,8 @@ if (typeof __firebase_config !== 'undefined') {
       messagingSenderId: import.meta.env.VITE_FIREBASE_SENDER_ID,
       appId: import.meta.env.VITE_FIREBASE_APP_ID
     };
+    // Extract the Gemini key securely here to bypass Vite compiler warnings
+    globalGeminiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
   } catch (e) { /* Ignore in strict environments */ }
 }
 
@@ -72,8 +76,8 @@ const App = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   
-  // Wire up the Gemini API key from the environment variables
-  const apiKey = ""; 
+  // Connect the securely extracted key to the component
+  const apiKey = globalGeminiKey; 
 
   // --- AUTHENTICATION LISTENER ---
   useEffect(() => {
@@ -278,6 +282,8 @@ const App = () => {
 
   // --- GEMINI HELPERS ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
+    if (!apiKey) throw new Error("API Key is missing. Ensure VITE_GEMINI_API_KEY is set in your Coolify environment variables.");
+    
     const maxRetries = 5; let delay = 1000;
     for (let i = 0; i < maxRetries; i++) {
       try {
@@ -286,11 +292,20 @@ const App = () => {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
         });
+        
+        // Safety net to catch 403s before they crash the JSON parser
+        if (!response.ok) {
+          throw new Error(`Google API threw a ${response.status}. Your API key might be missing, invalid, or lacking permissions.`);
+        }
+
         const result = await response.json();
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         return isJson ? JSON.parse(text) : text;
       } catch (error) {
-        if (i === maxRetries - 1) throw error;
+        if (i === maxRetries - 1) {
+          alert(`AI Engine Error: ${error.message}`);
+          throw error;
+        }
         await new Promise(r => setTimeout(r, delay)); delay *= 2;
       }
     }
@@ -302,10 +317,12 @@ const App = () => {
       const systemPrompt = `Expert comedy director. Generate JSON array of 8 shots: "type", "subject", "action", "notes", "dialogue", "shotCharacters" (array of strings selected from the provided sketch characters).`;
       const prompt = `TONE: ${activeSketch.tone}\nCHARACTERS AVAILABLE: ${activeSketch.characters}\nHOOK: ${activeSketch.hook}\nESCALATION: ${activeSketch.escalation}\nENDING: ${activeSketch.ending}`;
       const newShotsData = await callGemini(prompt, systemPrompt, true);
-      setShots([...shots, ...newShotsData.map((s, idx) => ({ 
-        ...s, id: `ai-${Date.now()}-${idx}`, sketchId: activeSketchId, number: activeShots.length + idx + 1, 
-        fx: false, image: null, locationCaveat: '', shotCharacters: Array.isArray(s.shotCharacters) ? s.shotCharacters : [] 
-      }))]);
+      if (newShotsData) {
+        setShots([...shots, ...newShotsData.map((s, idx) => ({ 
+          ...s, id: `ai-${Date.now()}-${idx}`, sketchId: activeSketchId, number: activeShots.length + idx + 1, 
+          fx: false, image: null, locationCaveat: '', shotCharacters: Array.isArray(s.shotCharacters) ? s.shotCharacters : [] 
+        }))]);
+      }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, genShots: false })); }
   };
 
@@ -315,16 +332,24 @@ const App = () => {
       const systemPrompt = `Expert 1st AD. Reorder shots into most efficient SHOOT ORDER. Group by Location Caveats, Shot Types, and active Characters. Return JSON array of objects with 'id' and 'reason'.`;
       const prompt = `Scene: ${activeSketch.title}\nShots: ${activeShots.map(s => `ID: ${s.id}, Type: ${s.type}, Subject: ${s.subject}, Location: ${s.locationCaveat || 'Base'}, Chars: ${(s.shotCharacters||[]).join(',')}`).join('\n')}`;
       const optimizedIds = await callGemini(prompt, systemPrompt, true);
-      setShootPlan(optimizedIds.map((item, idx) => ({ ...activeShots.find(s => s.id === item.id), shootOrderNumber: idx + 1, optimizationReason: item.reason })));
-      setViewMode('shoot-plan');
+      if (optimizedIds) {
+        setShootPlan(optimizedIds.map((item, idx) => ({ ...activeShots.find(s => s.id === item.id), shootOrderNumber: idx + 1, optimizationReason: item.reason })));
+        setViewMode('shoot-plan');
+      }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, optimizing: false })); }
   };
 
   const generateStoryboardFrame = async (shotId) => {
+    if (!apiKey) {
+      alert("API Key is missing. Please set VITE_GEMINI_API_KEY.");
+      return;
+    }
+    
     setLoadingStates(prev => ({ ...prev, [shotId]: true }));
     const shot = shots.find(s => s.id === shotId);
     const charsContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters;
     const promptText = `A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${charsContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`;
+    
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -332,7 +357,7 @@ const App = () => {
       });
       
       if (!response.ok) {
-        throw new Error(`Google API threw a ${response.status}. The Imagen model might be locked for your account/region.`);
+        throw new Error(`Google API threw a ${response.status}. The Imagen model might be locked for your account/region, or your key is missing.`);
       }
 
       const result = await response.json();
@@ -351,8 +376,10 @@ const App = () => {
       const systemPrompt = `You are an expert comedy writer specializing in ${activeSketch.tone} humor. Turn this shot list and outline into a formatted script. Use standard screenplay format. Make it funny, coherent, and match the specified tone perfectly.`;
       const prompt = `Title: ${activeSketch.title}\nTone: ${activeSketch.tone}\nCharacters: ${activeSketch.characters}\nProps: ${activeSketch.props}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}\n\nShot List:\n${activeShots.map(s => `Shot ${s.number} (${s.type}): ${s.subject}\nAction: ${s.action}\nNotes: ${s.notes}\nDialogue: ${s.dialogue}`).join('\n\n')}`;
       const scriptContent = await callGemini(prompt, systemPrompt, false);
-      updateSketch(activeSketchId, 'script', scriptContent);
-      setViewMode('script');
+      if (scriptContent) {
+        updateSketch(activeSketchId, 'script', scriptContent);
+        setViewMode('script');
+      }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, script: false })); }
   };
 
@@ -362,7 +389,7 @@ const App = () => {
     try {
       const prompt = `${contextPrompt}\nCharacters in shot: ${(shot.shotCharacters||[]).join(', ')}\nCurrent text: ${shot[field] || '[Empty]'}`;
       const newText = await callGemini(prompt, `${rolePrompt} Keep it under 2 sentences. Punch it up if text exists.`, false);
-      updateShot(shotId, field, newText.trim());
+      if (newText) updateShot(shotId, field, newText.trim());
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: false })); }
   };
 
@@ -372,7 +399,7 @@ const App = () => {
       const systemPrompt = `Brilliant comedy writer (${activeSketch.tone || 'comedic'} humor). Provide a punchy, creative ${beatType} for the sketch. Keep it under 3 sentences. Punch it up if text exists.`;
       const prompt = `Title: ${activeSketch.title}\nCharacters: ${activeSketch.characters}\nCurrent Hook: ${activeSketch.hook}\nCurrent Escalation: ${activeSketch.escalation}\nCurrent Ending: ${activeSketch.ending}\nTask: Write/Improve the ${beatType.toUpperCase()}.`;
       const newBeat = await callGemini(prompt, systemPrompt, false);
-      updateSketch(activeSketchId, beatType, newBeat.trim());
+      if (newBeat) updateSketch(activeSketchId, beatType, newBeat.trim());
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [beatType]: false })); }
   };
 
