@@ -5,7 +5,7 @@ import {
   BrainCircuit, Loader2, Quote, Zap, ArrowLeft, ImageIcon, 
   X, Download, Upload, Save, Maximize2, Map, ScrollText, 
   VenetianMask, ChevronUp, ChevronDown, Clapperboard, 
-  UserPlus, ArrowUp, ArrowDown, Cloud, CloudOff, GitBranch, LogOut, Lock
+  UserPlus, ArrowUp, ArrowDown, Cloud, CloudOff, GitBranch, LogOut, Lock, Copy
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -71,6 +71,7 @@ const App = () => {
   const [loadingStates, setLoadingStates] = useState({});
   const [zoomedImage, setZoomedImage] = useState(null);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(true);
+  const [visiblePromptId, setVisiblePromptId] = useState(null);
   const fileInputRef = useRef(null);
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -193,6 +194,30 @@ const App = () => {
   const updateSketch = (id, field, value) => setSketches(sketches.map(s => s.id === id ? { ...s, [field]: value } : s));
   const updateShot = (id, field, value) => setShots(shots.map(s => s.id === id ? { ...s, [field]: value } : s));
   
+  const handleImageUpload = (shotId, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => updateShot(shotId, 'image', e.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const copyPrompt = (text) => {
+    try {
+      navigator.clipboard.writeText(text);
+    } catch (err) {
+      // Fallback for strict browser security policies
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+    }
+    // Auto-hide the box after copying so it gets out of your way
+    setVisiblePromptId(null); 
+  };
+
   const addShot = () => {
     const nextNumber = activeShots.length > 0 ? Math.max(...activeShots.map(s => s.number)) + 1 : 1;
     setShots([...shots, { id: Date.now().toString(), sketchId: activeSketchId, number: nextNumber, type: 'Medium', subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: [] }]);
@@ -343,39 +368,6 @@ const App = () => {
         setViewMode('shoot-plan');
       }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, optimizing: false })); }
-  };
-
-  const generateStoryboardFrame = async (shotId) => {
-    setLoadingStates(prev => ({ ...prev, [shotId]: true }));
-    const shot = shots.find(s => s.id === shotId);
-    const charsContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters;
-    const promptText = `A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${charsContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`;
-    
-    try {
-      // The Renegade Fix Phase 2: Bypass the 'fetch' bot-blocker entirely.
-      // We encode the prompt and pass the raw URL directly to the browser's native Image renderer.
-      const safePrompt = encodeURIComponent(promptText);
-      const imageUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=800&height=450&nologo=true`;
-      
-      const img = new Image();
-      img.onload = () => {
-        // Once the browser successfully downloads it natively, we inject it into the UI.
-        updateShot(shotId, 'image', imageUrl);
-        setLoadingStates(prev => ({ ...prev, [shotId]: false }));
-      };
-      img.onerror = () => {
-        setLoadingStates(prev => ({ ...prev, [shotId]: false }));
-        alert("The visual API rejected the request. It might be currently overloaded.");
-      };
-      
-      // Trigger the native browser fetch
-      img.src = imageUrl;
-
-    } catch (err) { 
-      console.error(err);
-      setLoadingStates(prev => ({ ...prev, [shotId]: false }));
-      alert(`Storyboard Failed: ${err.message}`); 
-    }
   };
 
   const generateScript = async () => {
@@ -630,10 +622,26 @@ const App = () => {
                               </div>
                             </>
                           ) : (
-                            <div className="text-center p-6">
-                              {loadingStates[shot.id] ? <Loader2 className="animate-spin text-purple-500 mx-auto" size={32} /> : (
-                                <><ImageIcon className="text-zinc-800 mx-auto mb-3" size={40} />
-                                <button onClick={() => generateStoryboardFrame(shot.id)} disabled={!isRealUser} className="text-[10px] font-black text-zinc-500 hover:text-purple-400 border border-zinc-800 px-4 py-2 rounded-full flex items-center gap-2 disabled:opacity-50 disabled:hover:text-zinc-500">{!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />} VISUAL</button></>
+                            <div className="text-center p-6 w-full">
+                              {visiblePromptId === shot.id ? (
+                                <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-xl text-left relative animate-in fade-in zoom-in-95 duration-200 shadow-xl">
+                                  <button onClick={() => setVisiblePromptId(null)} className="absolute top-2 right-2 p-1 text-zinc-500 hover:text-white bg-zinc-800 rounded-full"><X size={10} /></button>
+                                  <p className="text-[9px] text-zinc-400 mb-2 font-mono pr-4 h-24 overflow-y-auto leading-relaxed select-all">
+                                    {`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`}
+                                  </p>
+                                  <button onClick={() => copyPrompt(`A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`)} className="w-full bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-black py-2 rounded flex items-center justify-center gap-1 transition-colors"><Copy size={10} /> COPY PROMPT</button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-center gap-3">
+                                  <ImageIcon className="text-zinc-800 mx-auto" size={32} />
+                                  <label className="text-[10px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 hover:border-orange-500/50 hover:bg-orange-500/10 px-4 py-2 rounded-full flex items-center gap-2 cursor-pointer transition-all">
+                                    <Upload size={10} /> UPLOAD IMAGE
+                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(shot.id, e)} />
+                                  </label>
+                                  <button onClick={() => setVisiblePromptId(shot.id)} className="text-[9px] font-black text-zinc-600 hover:text-purple-400 flex items-center gap-1 transition-colors uppercase tracking-widest">
+                                    <Sparkles size={10} /> GET AI PROMPT
+                                  </button>
+                                </div>
                               )}
                             </div>
                           )}
