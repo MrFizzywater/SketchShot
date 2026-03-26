@@ -58,7 +58,7 @@ const App = () => {
       id: '1', title: 'The Hot Dog Suit Incident', 
       settingType: 'INT.', location: 'FUNERAL HOME', timeOfDay: 'DAY',
       tone: 'Disruptive / Cringe', 
-      characters: '', // Legacy string field, kept for backward compatibility
+      characters: '', 
       characterProfiles: [
         { id: 'c1', name: 'Greg', desc: 'Sweaty, deeply defensive. Wearing a full-body hot dog suit with a broken industrial zipper.' },
         { id: 'c2', name: 'The Hot Dog Man', desc: 'A rival mascot who takes his job way too seriously.' },
@@ -81,6 +81,9 @@ const App = () => {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
+  
+  // NEW: Store the visual column grid setting for the Storyboard Print view
+  const [boardCols, setBoardCols] = useState(2);
   
   const apiKey = globalGeminiKey; 
 
@@ -338,7 +341,6 @@ const App = () => {
   const generateAISHots = async () => {
     setLoadingStates(prev => ({ ...prev, genShots: true }));
     try {
-      // FIX 1: Enforce a strict enum for the "type" field so React's <select> doesn't panic and default to 'Wide'
       const typeList = SHOT_TYPES.join(', ');
       const systemPrompt = `Expert comedy director. Generate JSON array of exactly 8 shots. Use these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "shotCharacters" (array of strings).`;
       const prompt = `TONE: ${activeSketch.tone}\nSCENE: ${formattedSceneHeading}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch.hook}\nESCALATION: ${activeSketch.escalation}\nENDING: ${activeSketch.ending}`;
@@ -409,13 +411,40 @@ const App = () => {
     } catch(err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: false })); }
   };
 
-  if (viewMode === 'print') {
+  // Safe mapping for Tailwind grid columns in print mode
+  const gridColsClass = {
+    1: 'grid-cols-1',
+    2: 'grid-cols-2',
+    3: 'grid-cols-3',
+    4: 'grid-cols-4',
+  }[boardCols] || 'grid-cols-2';
+
+  // --- PRINT RENDERER (Handles both List and Visual Boards) ---
+  if (viewMode === 'print' || viewMode === 'print-boards') {
     return (
       <div className="min-h-screen bg-white text-black p-6 md:p-12 font-serif overflow-y-auto">
-        <button onClick={() => setViewMode('storyboard')} className="fixed top-4 left-4 md:top-6 md:left-6 flex items-center gap-2 px-4 py-2 bg-black text-white rounded-full text-xs font-bold print:hidden shadow-lg z-50">
-          <ArrowLeft size={14} /> BACK
-        </button>
-        <div className="max-w-4xl mx-auto space-y-8 mt-12 md:mt-0">
+        <div className="fixed top-4 left-4 md:top-6 md:left-6 flex items-center gap-2 print:hidden z-50">
+          <button onClick={() => setViewMode('storyboard')} className="flex items-center gap-2 px-4 py-2 bg-black hover:bg-zinc-800 transition-colors text-white rounded-full text-xs font-bold shadow-lg">
+            <ArrowLeft size={14} /> BACK
+          </button>
+          
+          {viewMode === 'print-boards' && (
+            <div className="flex bg-zinc-200 rounded-full p-1 shadow-lg items-center ml-2">
+              <span className="text-[10px] font-black uppercase text-zinc-500 px-3 select-none">Columns:</span>
+              {[1, 2, 3, 4].map(num => (
+                <button key={num} onClick={() => setBoardCols(num)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${boardCols === num ? 'bg-black text-white' : 'text-zinc-600 hover:text-black'}`}>
+                  {num}
+                </button>
+              ))}
+            </div>
+          )}
+          
+          <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 transition-colors text-white rounded-full text-xs font-bold shadow-lg ml-2">
+            <Printer size={14} /> PRINT PDF
+          </button>
+        </div>
+
+        <div className="max-w-6xl mx-auto space-y-8 mt-16 md:mt-0">
           <div className="border-b-4 border-black pb-4 flex flex-col md:flex-row justify-between md:items-end gap-2">
             <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none">{activeSketch.title}</h1>
             <div className="text-left md:text-right text-[10px] font-bold uppercase">{new Date().toLocaleDateString()}</div>
@@ -425,38 +454,73 @@ const App = () => {
             <p><strong>CHARACTERS:</strong> {availableCharacters.join(', ') || 'N/A'}</p>
             <p className="md:col-span-2"><strong>PROPS:</strong> {activeSketch.props || 'None'}</p>
           </div>
-          <div className="space-y-2 text-sm">
-            <p><strong>HOOK:</strong> {activeSketch.hook}</p>
-            <p><strong>ESCALATION:</strong> {activeSketch.escalation}</p>
-            <p><strong>ENDING:</strong> {activeSketch.ending}</p>
-          </div>
-          <div className="space-y-4 overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[600px]">
-              <thead><tr className="border-b-2 border-black text-[10px] font-black uppercase tracking-widest"><th className="py-2 w-12">#</th><th className="py-2 w-24">Type</th><th className="py-2">Details & Action</th><th className="py-2 w-16">FX</th></tr></thead>
-              <tbody>
-                {currentDisplayList.map((shot, idx) => (
-                  <tr key={shot.id} className="border-b border-zinc-200 align-top">
-                    <td className="py-4 font-bold">{idx + 1}</td>
-                    <td className="py-4 font-bold text-[10px] uppercase">
-                      {shot.type}
-                      {shot.shotCharacters?.length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          {shot.shotCharacters.map(c => <span key={c} className="block text-[8px] bg-zinc-100 px-1 py-0.5 rounded border border-zinc-300 w-fit">{c}</span>)}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-4 space-y-1 pr-4">
-                      <p className="font-bold">{shot.subject}</p>
-                      {shot.action && <p className="text-sm">{shot.action}</p>}
-                      {shot.dialogue && <p className="text-xs italic">"{shot.dialogue}"</p>}
-                      {shot.notes && <p className="text-[10px] text-zinc-500">Note: {shot.notes}</p>}
-                    </td>
-                    <td className="py-4 font-black text-xs">{shot.fx ? 'YES' : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+          {viewMode === 'print' ? (
+            // --- TEXT-ONLY SHOOT PLAN ---
+            <div className="space-y-4 overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead><tr className="border-b-2 border-black text-[10px] font-black uppercase tracking-widest"><th className="py-2 w-12">#</th><th className="py-2 w-24">Type</th><th className="py-2">Details & Action</th><th className="py-2 w-16">FX</th></tr></thead>
+                <tbody>
+                  {currentDisplayList.map((shot, idx) => (
+                    <tr key={shot.id} className="border-b border-zinc-200 align-top break-inside-avoid">
+                      <td className="py-4 font-bold">{idx + 1}</td>
+                      <td className="py-4 font-bold text-[10px] uppercase">
+                        {shot.type}
+                        {shot.shotCharacters?.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {shot.shotCharacters.map(c => <span key={c} className="block text-[8px] bg-zinc-100 px-1 py-0.5 rounded border border-zinc-300 w-fit">{c}</span>)}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-4 space-y-1 pr-4">
+                        <p className="font-bold">{shot.subject}</p>
+                        {shot.action && <p className="text-sm">{shot.action}</p>}
+                        {shot.dialogue && <p className="text-xs italic">"{shot.dialogue}"</p>}
+                        {shot.notes && <p className="text-[10px] text-zinc-500">Note: {shot.notes}</p>}
+                      </td>
+                      <td className="py-4 font-black text-xs">{shot.fx ? 'YES' : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            // --- VISUAL STORYBOARD GRID ---
+            <div className={`grid ${gridColsClass} gap-6 md:gap-8 w-full print:gap-4`}>
+              {currentDisplayList.map((shot, idx) => (
+                <div key={shot.id} className="break-inside-avoid flex flex-col border-2 border-black rounded-lg overflow-hidden bg-white shadow-sm">
+                  <div className="aspect-video border-b-2 border-black bg-zinc-100 flex items-center justify-center relative overflow-hidden">
+                    {shot.image ? (
+                      <img src={shot.image} alt={`Shot ${idx + 1}`} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="text-zinc-300 font-sans font-black tracking-widest uppercase text-xl">NO IMAGE</div>
+                    )}
+                    <div className="absolute top-2 left-2 bg-white border-2 border-black px-2 py-0.5 text-xs font-black shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+                      {idx + 1}
+                    </div>
+                    {shot.fx && (
+                      <div className="absolute top-2 right-2 bg-orange-500 text-white border-2 border-black px-2 py-0.5 text-[10px] font-black shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+                        FX
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-4 font-sans space-y-3">
+                    <div className="font-black uppercase text-sm border-b border-zinc-200 pb-2">
+                      <span className="text-zinc-500 mr-2">[{shot.type}]</span>{shot.subject}
+                    </div>
+                    
+                    <div className="text-xs space-y-2">
+                      {shot.locationCaveat && <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest bg-zinc-100 p-1.5 rounded inline-block">LOC: {shot.locationCaveat}</div>}
+                      
+                      {shot.action && <p className="leading-snug"><span className="font-bold uppercase text-[10px] tracking-widest block text-zinc-500 mb-0.5">Action</span> {shot.action}</p>}
+                      {shot.dialogue && <p className="leading-snug italic"><span className="font-bold uppercase not-italic text-[10px] tracking-widest block text-zinc-500 mb-0.5">Dialogue</span> "{shot.dialogue}"</p>}
+                      {shot.notes && <p className="leading-snug text-zinc-600"><span className="font-bold text-black uppercase text-[10px] tracking-widest block mb-0.5">Notes</span> {shot.notes}</p>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -542,7 +606,8 @@ const App = () => {
                     <button onClick={() => setViewMode('script')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'script' ? 'bg-blue-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>
                       SCRIPT
                     </button>
-                    <button onClick={() => setViewMode('print')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 hidden sm:flex items-center gap-1"><Printer size={10} /> PRINT</button>
+                    <button onClick={() => setViewMode('print')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 hidden sm:flex items-center gap-1 hover:text-white transition-colors"><FileText size={10} /> PLAN</button>
+                    <button onClick={() => setViewMode('print-boards')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 hidden sm:flex items-center gap-1 hover:text-white transition-colors"><Layout size={10} /> BOARDS</button>
                   </div>
                 </div>
 
@@ -594,7 +659,6 @@ const App = () => {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800 w-full">
-                    {/* FIX 2: Slick 3-part Scene Heading Builder */}
                     <div className="space-y-1 sm:col-span-2">
                       <span className="text-[9px] font-black text-zinc-600 uppercase">Scene Heading</span>
                       <div className="flex bg-zinc-950/50 rounded-xl border border-zinc-800 focus-within:border-orange-500/50 overflow-hidden shadow-inner">
@@ -620,7 +684,6 @@ const App = () => {
                     </div>
                   </div>
 
-                  {/* --- NEW CHARACTER BIBLE PANEL --- */}
                   <div className="pt-6 border-t border-zinc-800/50 mt-6 w-full">
                     <div className="flex justify-between items-center mb-4">
                       <label className="text-[10px] font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
@@ -646,7 +709,6 @@ const App = () => {
                       ))}
                     </div>
                   </div>
-                  {/* --- END CHARACTER BIBLE --- */}
                 </div>
               )}
             </div>
