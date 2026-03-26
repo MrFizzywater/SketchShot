@@ -6,7 +6,7 @@ import {
   X, Download, Upload, Save, Maximize2, Map, 
   ChevronUp, ChevronDown, 
   UserPlus, ArrowUp, ArrowDown, Cloud, GitBranch, LogOut, Lock, Copy, Menu,
-  ScrollText, VenetianMask, Clapperboard
+  ScrollText, VenetianMask, Clapperboard, Key
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -54,6 +54,7 @@ const App = () => {
   const [isGuest, setIsGuest] = useState(false);
   const isRealUser = user && !user.isAnonymous;
 
+  // --- APP STATE ---
   const [sketches, setSketches] = useState([
     { 
       id: '1', title: 'The Hot Dog Suit Incident', 
@@ -73,22 +74,20 @@ const App = () => {
   const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
   const [viewMode, setViewMode] = useState('storyboard'); 
   const [shootPlan, setShootPlan] = useState([]);
-  
-  // STATE: Tracks individual button spinners
   const [loadingStates, setLoadingStates] = useState({});
-  // NEW STATE: Global lockout to prevent concurrent API spamming
   const [isAIBusy, setIsAIBusy] = useState(false); 
-  
   const [zoomedImage, setZoomedImage] = useState(null);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(window.innerWidth > 768);
   const [visiblePromptId, setVisiblePromptId] = useState(null);
   const [sketchToDelete, setSketchToDelete] = useState(null);
   const fileInputRef = useRef(null);
 
+  // --- BYOK (Bring Your Own Key) STATE ---
+  const [userApiKey, setUserApiKey] = useState(localStorage.getItem('sketchshot_gemini_key') || '');
+
   const [isSyncing, setIsSyncing] = useState(false);
   const isInitialLoad = useRef({ sketches: true, shots: true });
   const [boardCols, setBoardCols] = useState(2);
-  const apiKey = globalGeminiKey; 
 
   // --- STRICT AUTHENTICATION BOOT ---
   useEffect(() => {
@@ -201,6 +200,7 @@ const App = () => {
       </div>
     );
   }
+  // ==========================================
 
   const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
   const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
@@ -272,7 +272,7 @@ const App = () => {
   const updateChar = (charId, field, value) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.map(p => p.id === charId ? { ...p, [field]: value } : p));
   const removeChar = (charId) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.filter(p => p.id !== charId));
 
-  // The Downsampler - compresses big raw files into 800px 70% jpegs
+  // The Downsampler
   const handleImageUpload = (shotId, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -345,7 +345,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "1.7", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "1.8", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -406,13 +406,18 @@ const App = () => {
     }
   };
 
-  // --- THE AI ENGINE (With Global Set Lockout) ---
+  // --- THE AI ENGINE (With Global Set Lockout & BYOK support) ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
-    if (!apiKey) throw new Error("API Key is missing.");
+    // BYOK Logic: Use user's key first, fall back to global key
+    const activeKey = userApiKey || apiKey;
     
-    setIsAIBusy(true); // Lock the entire set
+    if (!activeKey) {
+      alert("API Key missing! Please enter your own Gemini API key in the sidebar Settings panel.");
+      throw new Error("API Key is missing.");
+    }
     
-    // Loosened the shock absorber: Wait 3s, then 4.5s, then 6.7s... (up to ~40s total hold time)
+    setIsAIBusy(true); 
+    
     const maxRetries = 6; let delay = 3000; 
     
     try {
@@ -421,13 +426,11 @@ const App = () => {
           const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           });
           
-          if (response.status === 429) {
-            throw new Error("429");
-          }
+          if (response.status === 429) throw new Error("429");
           if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
           
           const result = await response.json();
@@ -437,7 +440,7 @@ const App = () => {
         } catch (error) {
           if (i === maxRetries - 1) { 
             if (error.message === "429") {
-               alert("Union Break! The AI is rate-limited by the Google free tier. Give it 30 seconds to catch its breath and try again."); 
+               alert(`Union Break! The AI hit a rate limit (Error 429).${!userApiKey ? " Try entering your own API key in the sidebar to bypass the shared limits!" : " Your API key is generating too fast."} Give it 30 seconds to breathe.`); 
             } else {
                alert(`AI Error: ${error.message}`); 
             }
@@ -448,7 +451,7 @@ const App = () => {
         }
       }
     } finally {
-      setIsAIBusy(false); // Unlock the set
+      setIsAIBusy(false); 
     }
   };
 
@@ -739,32 +742,52 @@ const App = () => {
           <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Sketch', settingType: 'INT.', location: 'LOCATION', timeOfDay: 'DAY', tone: 'Absurdist', characters: '', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW SKETCH</button>
         </nav>
 
-        {/* CLOUD SYNC & LOGOUT PANEL */}
-        <div className="p-4 border-t border-zinc-800 space-y-3 bg-zinc-950/50">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-            <Cloud className="text-green-500" size={14} /> Cloud Rig
-          </div>
-          
-          <div className="space-y-2">
-            <div className="text-xs text-zinc-400 truncate flex items-center justify-between">
-              <span className="truncate mr-2">{isRealUser ? user.email : 'Guest Viewer'}</span>
-              {isRealUser ? (
-                <button onClick={() => signOut(auth)} className="text-red-400 hover:text-red-300 shrink-0" title="Sign Out"><LogOut size={14} /></button>
-              ) : (
-                <button onClick={() => { setIsGuest(false); setAuthResolved(true); }} className="text-orange-400 hover:text-orange-300 font-bold shrink-0" title="Log In">LOG IN</button>
-              )}
+        {/* CLOUD SYNC & BYOK PANEL */}
+        <div className="border-t border-zinc-800 bg-zinc-950/50 flex flex-col">
+          {/* BYOK: Bring Your Own Key Section */}
+          <div className="p-4 border-b border-zinc-800/50 space-y-3">
+            <div className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center gap-2">
+              <Key size={14} /> AI Settings
             </div>
-            <button onClick={pushToCloud} disabled={isSyncing || !isRealUser} className="w-full flex justify-center items-center gap-2 px-3 py-2 text-[10px] font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none">
-              {isSyncing ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Save size={12} />)}
-              SYNC TO CLOUD
-            </button>
+            <p className="text-[9px] text-zinc-500 leading-tight">Paste your own Gemini API key here to bypass the shared rate limits.</p>
+            <input 
+              type="password" 
+              value={userApiKey}
+              onChange={(e) => {
+                setUserApiKey(e.target.value);
+                localStorage.setItem('sketchshot_gemini_key', e.target.value);
+              }}
+              placeholder="Enter Gemini Key..." 
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-zinc-300 focus:outline-none focus:border-purple-500"
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/50">
-            <button onClick={exportSnapshot} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 rounded-lg transition-all"><Download size={10} /> BACKUP</button>
-            <button onClick={handleImportClick} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-purple-400 border border-zinc-800 rounded-lg transition-all"><Upload size={10} /> IMPORT</button>
+          <div className="p-4 space-y-3">
+            <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+              <Cloud className="text-green-500" size={14} /> Cloud Rig
+            </div>
+            
+            <div className="space-y-2">
+              <div className="text-xs text-zinc-400 truncate flex items-center justify-between">
+                <span className="truncate mr-2">{isRealUser ? user.email : 'Guest Viewer'}</span>
+                {isRealUser ? (
+                  <button onClick={() => signOut(auth)} className="text-red-400 hover:text-red-300 shrink-0" title="Sign Out"><LogOut size={14} /></button>
+                ) : (
+                  <button onClick={() => { setIsGuest(false); setAuthResolved(true); }} className="text-orange-400 hover:text-orange-300 font-bold shrink-0" title="Log In">LOG IN</button>
+                )}
+              </div>
+              <button onClick={pushToCloud} disabled={isSyncing || !isRealUser} className="w-full flex justify-center items-center gap-2 px-3 py-2 text-[10px] font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none">
+                {isSyncing ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Save size={12} />)}
+                SYNC TO CLOUD
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/50">
+              <button onClick={exportSnapshot} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 rounded-lg transition-all"><Download size={10} /> BACKUP</button>
+              <button onClick={handleImportClick} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-purple-400 border border-zinc-800 rounded-lg transition-all"><Upload size={10} /> IMPORT</button>
+            </div>
+            <input type="file" ref={fileInputRef} onChange={importSnapshot} accept=".json" className="hidden" />
           </div>
-          <input type="file" ref={fileInputRef} onChange={importSnapshot} accept=".json" className="hidden" />
         </div>
       </aside>
 
