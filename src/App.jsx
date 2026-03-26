@@ -345,7 +345,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "1.8", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "1.9", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -406,10 +406,10 @@ const App = () => {
     }
   };
 
-  // --- THE AI ENGINE (With Global Set Lockout & BYOK support) ---
+  // --- THE BULLETPROOF AI ENGINE (1.5 Flash) ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
-    // BYOK Logic: Use user's key first, fall back to global key
-    const activeKey = userApiKey || apiKey;
+    // Clean the key just in case an invisible space was copied/pasted
+    const activeKey = (userApiKey || apiKey).trim();
     
     if (!activeKey) {
       alert("API Key missing! Please enter your own Gemini API key in the sidebar Settings panel.");
@@ -417,7 +417,6 @@ const App = () => {
     }
     
     setIsAIBusy(true); 
-    
     const maxRetries = 6; let delay = 3000; 
     
     try {
@@ -426,7 +425,8 @@ const App = () => {
           const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`, {
+          // Using 1.5-flash: Massive free-tier limits, avoids instant 429 Quota errors from preview/pro models
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           });
           
