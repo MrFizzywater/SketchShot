@@ -340,28 +340,30 @@ const App = () => {
   };
 
   const generateStoryboardFrame = async (shotId) => {
-    if (!apiKey) {
-      alert("API Key is missing. Please set VITE_GEMINI_API_KEY.");
-      return;
-    }
-    
     setLoadingStates(prev => ({ ...prev, [shotId]: true }));
     const shot = shots.find(s => s.id === shotId);
     const charsContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.join(', ') : activeSketch.characters;
     const promptText = `A rough black and white pencil sketch storyboard frame for a comedy sketch titled "${activeSketch.title}". Context: ${shot.locationCaveat || activeSketch.sceneType}. Characters in frame: ${charsContext}. Action/Subject: A ${shot.type} shot of ${shot.subject}. Action: ${shot.action}. Notes: ${shot.notes}. Style: Traditional hand-drawn graphite pencil storyboard, rough sketch, cinematic framing.`;
     
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instances: [{ prompt: promptText }], parameters: { sampleCount: 1 } })
-      });
+      // The Renegade Fix: Bypass Google's corporate API entirely using an open-source alternative
+      const safePrompt = encodeURIComponent(promptText);
+      const imageUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=800&height=450&nologo=true`;
       
-      if (!response.ok) {
-        throw new Error(`Google API threw a ${response.status}. The Imagen model might be locked for your account/region, or your key is missing.`);
-      }
+      // Fetch the image as a blob so the user's local download button still works perfectly
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error("Open API failed to generate image.");
+      
+      const blob = await response.blob();
+      const reader = new FileReader();
+      
+      // Wrap the FileReader in a Promise to keep the async/await flow clean
+      const base64data = await new Promise((resolve) => {
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
 
-      const result = await response.json();
-      updateShot(shotId, 'image', `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`);
+      updateShot(shotId, 'image', base64data);
     } catch (err) { 
       console.error(err);
       alert(`Storyboard Failed: ${err.message}`); 
