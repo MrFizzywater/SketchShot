@@ -73,7 +73,12 @@ const App = () => {
   const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
   const [viewMode, setViewMode] = useState('storyboard'); 
   const [shootPlan, setShootPlan] = useState([]);
+  
+  // STATE: Tracks individual button spinners
   const [loadingStates, setLoadingStates] = useState({});
+  // NEW STATE: Global lockout to prevent concurrent API spamming
+  const [isAIBusy, setIsAIBusy] = useState(false); 
+  
   const [zoomedImage, setZoomedImage] = useState(null);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(window.innerWidth > 768);
   const [visiblePromptId, setVisiblePromptId] = useState(null);
@@ -335,7 +340,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "1.6", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "1.7", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -396,42 +401,49 @@ const App = () => {
     }
   };
 
-  // --- THE AI ENGINE ---
-  // Using 2.5-Flash for speed and generous free-tier limits, wrapped in a 429 shock absorber
+  // --- THE AI ENGINE (With Global Set Lockout) ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
     if (!apiKey) throw new Error("API Key is missing.");
-    const maxRetries = 5; let delay = 2000; 
     
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
-        if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
-        
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-        });
-        
-        if (response.status === 429) {
-          throw new Error("429");
-        }
-        if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
-        
-        const result = await response.json();
-        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        return isJson ? JSON.parse(text) : text;
-        
-      } catch (error) {
-        if (i === maxRetries - 1) { 
-          if (error.message === "429") {
-             alert("Union Break! The AI is rate-limited. Give it 30 seconds to catch its breath and try again."); 
-          } else {
-             alert(`AI Error: ${error.message}`); 
+    setIsAIBusy(true); // Lock the entire set
+    
+    // Loosened the shock absorber: Wait 3s, then 4.5s, then 6.7s... (up to ~40s total hold time)
+    const maxRetries = 6; let delay = 3000; 
+    
+    try {
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
+          if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
+          
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          });
+          
+          if (response.status === 429) {
+            throw new Error("429");
           }
-          throw error; 
+          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+          
+          const result = await response.json();
+          const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+          return isJson ? JSON.parse(text) : text;
+          
+        } catch (error) {
+          if (i === maxRetries - 1) { 
+            if (error.message === "429") {
+               alert("Union Break! The AI is rate-limited by the Google free tier. Give it 30 seconds to catch its breath and try again."); 
+            } else {
+               alert(`AI Error: ${error.message}`); 
+            }
+            throw error; 
+          }
+          await new Promise(r => setTimeout(r, delay)); 
+          delay *= 1.5; 
         }
-        await new Promise(r => setTimeout(r, delay)); 
-        delay *= 2; 
       }
+    } finally {
+      setIsAIBusy(false); // Unlock the set
     }
   };
 
@@ -505,7 +517,6 @@ const App = () => {
   };
 
   // --- THE "YES, AND" FIX ---
-  // Tells the AI to embrace existing text and escalate it, rather than overwriting it.
   const generateTextAssist = async (shotId, field, rolePrompt, contextPrompt) => {
     setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: true }));
     const shot = shots.find(s => s.id === shotId);
@@ -770,7 +781,7 @@ const App = () => {
                   
                   <div className="flex flex-wrap gap-2 mt-4">
                     <button onClick={() => setViewMode('storyboard')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'storyboard' ? 'bg-zinc-100 text-zinc-950' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>STORYBOARD</button>
-                    <button onClick={() => shootPlan.length > 0 ? setViewMode('shoot-plan') : optimizeShootOrder()} disabled={!isRealUser && shootPlan.length === 0} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full flex items-center gap-2 ${viewMode === 'shoot-plan' ? 'bg-orange-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'} disabled:opacity-50`}>
+                    <button onClick={() => shootPlan.length > 0 ? setViewMode('shoot-plan') : optimizeShootOrder()} disabled={!isRealUser && shootPlan.length === 0 || isAIBusy} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full flex items-center gap-2 ${viewMode === 'shoot-plan' ? 'bg-orange-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'} disabled:opacity-50`}>
                       {loadingStates.optimizing ? <Loader2 size={10} className="animate-spin" /> : (!isRealUser && shootPlan.length === 0 ? <Lock size={10} /> : <Zap size={10} />)} SHOOT PLAN
                     </button>
                     <button onClick={() => setViewMode('script')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'script' ? 'bg-blue-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>
@@ -782,10 +793,10 @@ const App = () => {
                 </div>
 
                 <div className="flex flex-row flex-wrap xl:flex-nowrap gap-2 items-center w-full xl:w-auto mt-2 xl:mt-0">
-                  <button onClick={generateAISHots} disabled={loadingStates.genShots || !isRealUser} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-purple-900/20 whitespace-nowrap">
+                  <button onClick={generateAISHots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-purple-900/20 whitespace-nowrap">
                     {loadingStates.genShots ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <Sparkles size={14} />)} BUILD LIST
                   </button>
-                  <button onClick={generateScript} disabled={loadingStates.script || !isRealUser} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-blue-900/20 whitespace-nowrap">
+                  <button onClick={generateScript} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-blue-900/20 whitespace-nowrap">
                     {loadingStates.script ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <ScrollText size={14} />)} WRITE SCRIPT
                   </button>
                   <button onClick={() => setIsDetailsExpanded(!isDetailsExpanded)} className="p-3 md:p-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-full text-zinc-400 transition-colors border border-zinc-700 shrink-0">
@@ -809,7 +820,7 @@ const App = () => {
                       <div key={beat} className="space-y-2">
                         <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between">
                           <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> The {beat}</span>
-                          <button onClick={() => generateNarrativeBeat(beat)} disabled={!isRealUser} className="p-1 hover:bg-orange-500/20 rounded transition-colors disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Sparkles size={12} className="text-orange-500" />}</button>
+                          <button onClick={() => generateNarrativeBeat(beat)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-orange-500/20 rounded transition-colors disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Sparkles size={12} className="text-orange-500" />}</button>
                         </label>
                         <textarea value={activeSketch?.[beat] || ''} onChange={(e) => updateSketch(activeSketchId, beat, e.target.value)} className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none min-h-[80px] resize-none" />
                       </div>
@@ -859,7 +870,7 @@ const App = () => {
                           </div>
                           <div className="relative">
                             <textarea value={char.desc || ''} onChange={(e) => updateChar(char.id, 'desc', e.target.value)} placeholder="Vibe, wardrobe, fatal flaw..." className="w-full bg-zinc-950/50 rounded-xl p-3 text-xs text-zinc-400 resize-none focus:outline-none border border-zinc-800/50 focus:border-green-500/30 h-20" />
-                            <button onClick={() => generateCharDesc(char.id)} disabled={!isRealUser || loadingStates[`char-${char.id}`]} className="absolute bottom-2 right-2 p-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-green-400 transition-colors disabled:opacity-50" title="Generate character flaw">
+                            <button onClick={() => generateCharDesc(char.id)} disabled={!isRealUser || isAIBusy} className="absolute bottom-2 right-2 p-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-green-400 transition-colors disabled:opacity-50" title="Generate character flaw">
                               {loadingStates[`char-${char.id}`] ? <Loader2 size={10} className="animate-spin text-green-500" /> : (!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />)}
                             </button>
                           </div>
@@ -969,7 +980,7 @@ const App = () => {
                         
                         <div className="space-y-2 w-full">
                           <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-                            <button onClick={() => generateTextAssist(shot.id, 'action', 'Director blocking physical comedy.', `Shot Subject: ${shot.subject}`)} disabled={!isRealUser} className="p-1 hover:bg-orange-500/20 rounded disabled:opacity-50 shrink-0">{!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Clapperboard size={12} className="text-orange-500" />}</button> Action / Blocking
+                            <button onClick={() => generateTextAssist(shot.id, 'action', 'Director blocking physical comedy.', `Shot Subject: ${shot.subject}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-orange-500/20 rounded disabled:opacity-50 shrink-0">{loadingStates[`action-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Clapperboard size={12} className="text-orange-500" />)}</button> Action / Blocking
                           </div>
                           <textarea value={shot.action || ''} onChange={(e) => updateShot(shot.id, 'action', e.target.value)} className="w-full bg-zinc-950/50 rounded-[1.5rem] p-4 text-xs text-zinc-300 min-h-[80px] md:min-h-[60px] focus:outline-none border border-zinc-800/50 focus:border-orange-500/50 resize-y" />
                         </div>
@@ -977,13 +988,13 @@ const App = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 w-full">
                           <div className="space-y-2 w-full">
                             <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-                              <button onClick={() => generateTextAssist(shot.id, 'dialogue', 'Writer drafting dialogue.', `Subject: ${shot.subject}, Action: ${shot.action}`)} disabled={!isRealUser} className="p-1 hover:bg-purple-500/20 rounded disabled:opacity-50 shrink-0">{!isRealUser ? <Lock size={12} className="text-purple-500" /> : <Quote size={12} className="text-purple-500" />}</button> Dialogue / Improv
+                              <button onClick={() => generateTextAssist(shot.id, 'dialogue', 'Writer drafting dialogue.', `Subject: ${shot.subject}, Action: ${shot.action}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-purple-500/20 rounded disabled:opacity-50 shrink-0">{loadingStates[`dialogue-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} className="text-purple-500" /> : <Quote size={12} className="text-purple-500" />)}</button> Dialogue / Improv
                             </div>
                             <textarea value={shot.dialogue || ''} onChange={(e) => updateShot(shot.id, 'dialogue', e.target.value)} className="w-full bg-zinc-950/50 rounded-[1.5rem] p-4 text-xs text-zinc-200 min-h-[100px] focus:outline-none border border-zinc-800/50 focus:border-purple-500/50 resize-y" />
                           </div>
                           <div className="space-y-2 w-full">
                             <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-                              <button onClick={() => generateTextAssist(shot.id, 'notes', 'DP advising on camera/light.', `Type: ${shot.type}, Subject: ${shot.subject}`)} disabled={!isRealUser} className="p-1 hover:bg-blue-500/20 rounded disabled:opacity-50 shrink-0">{!isRealUser ? <Lock size={12} className="text-blue-500" /> : <Wand2 size={12} className="text-blue-500" />}</button> Director Notes
+                              <button onClick={() => generateTextAssist(shot.id, 'notes', 'DP advising on camera/light.', `Type: ${shot.type}, Subject: ${shot.subject}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-blue-500/20 rounded disabled:opacity-50 shrink-0">{loadingStates[`notes-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} className="text-blue-500" /> : <Wand2 size={12} className="text-blue-500" />)}</button> Director Notes
                             </div>
                             <textarea value={shot.notes || ''} onChange={(e) => updateShot(shot.id, 'notes', e.target.value)} className="w-full bg-zinc-950/50 rounded-[1.5rem] p-4 text-xs text-zinc-400 min-h-[100px] focus:outline-none border border-zinc-800/50 focus:border-blue-500/50 resize-y italic" />
                           </div>
@@ -1000,7 +1011,7 @@ const App = () => {
                 <button onClick={addShot} className="w-full py-8 border-2 border-dashed border-zinc-800 rounded-[2rem] md:rounded-[3rem] text-zinc-600 hover:text-orange-500 hover:border-orange-500/50 hover:bg-orange-500/5 transition-all flex flex-col items-center justify-center gap-3 font-black tracking-widest group">
                   <div className="bg-zinc-900 group-hover:bg-orange-500/20 p-4 rounded-full"><Plus size={24} className="text-zinc-500 group-hover:text-orange-500" /></div> ADD NEW SHOT
                 </button>
-                <button onClick={generateSingleAIShot} disabled={!isRealUser || loadingStates.singleAIShot} className="w-full py-8 border-2 border-dashed border-purple-900/50 rounded-[2rem] md:rounded-[3rem] text-purple-600/50 hover:text-purple-400 hover:border-purple-500/50 hover:bg-purple-500/5 transition-all flex flex-col items-center justify-center gap-3 font-black tracking-widest group disabled:opacity-50">
+                <button onClick={generateSingleAIShot} disabled={!isRealUser || isAIBusy} className="w-full py-8 border-2 border-dashed border-purple-900/50 rounded-[2rem] md:rounded-[3rem] text-purple-600/50 hover:text-purple-400 hover:border-purple-500/50 hover:bg-purple-500/5 transition-all flex flex-col items-center justify-center gap-3 font-black tracking-widest group disabled:opacity-50">
                   <div className="bg-purple-900/20 group-hover:bg-purple-500/20 p-4 rounded-full">
                     {loadingStates.singleAIShot ? <Loader2 size={24} className="animate-spin text-purple-500" /> : (!isRealUser ? <Lock size={24} /> : <Sparkles size={24} className="text-purple-500 group-hover:text-purple-400" />)}
                   </div> 
