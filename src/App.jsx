@@ -67,7 +67,10 @@ const App = () => {
   const [shootPlan, setShootPlan] = useState([]);
   const [loadingStates, setLoadingStates] = useState({});
   const [zoomedImage, setZoomedImage] = useState(null);
-  const [isDetailsExpanded, setIsDetailsExpanded] = useState(true);
+  
+  // FIX 1: Auto-collapse the massive details header on mobile boot so you start at the shot list
+  const [isDetailsExpanded, setIsDetailsExpanded] = useState(window.innerWidth > 768);
+  
   const [visiblePromptId, setVisiblePromptId] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -509,7 +512,8 @@ const App = () => {
         </button>
 
         <div className="flex-1 overflow-y-auto w-full">
-          <header className="p-4 md:p-8 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-xl sticky top-0 z-10 w-full">
+          {/* FIX 2: Make header relative on mobile so it scrolls out of the way, keeping it sticky on desktop. Solid background on mobile prevents text bleed. */}
+          <header className="p-4 md:p-8 border-b border-zinc-800 bg-zinc-950 md:bg-zinc-950/90 md:backdrop-blur-xl relative md:sticky top-0 z-20 w-full shrink-0">
             <div className="max-w-6xl mx-auto">
               
               <div className="flex flex-col xl:flex-row justify-between xl:items-start gap-4 md:gap-6">
