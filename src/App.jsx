@@ -412,7 +412,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "2.3", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "2.4", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -483,7 +483,7 @@ const App = () => {
     }
   };
 
-  // --- THE TEXT AI ENGINE ---
+  // --- THE FULLY QUALIFIED AI ENGINE (FOR HETZNER DEPLOYMENT) ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
     const activeKey = (userApiKey || apiKey).trim();
     
@@ -501,7 +501,8 @@ const App = () => {
           const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`, {
+          // PUBLIC API ENDPOINT: Uses gemini-2.5-flash for production deployment
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           });
           
@@ -515,7 +516,7 @@ const App = () => {
         } catch (error) {
           if (i === maxRetries - 1) { 
             if (error.message === "429") {
-               alert(`Union Break! The AI hit a rate limit (Error 429). Give it 30 seconds to breathe.`); 
+               alert(`Union Break! The AI hit a rate limit (Error 429).${!userApiKey ? " Try entering your own API key in the sidebar to bypass the shared limits!" : " Your API key is generating too fast."} Give it 30 seconds to breathe.`); 
             } else {
                alert(`AI Error: ${error.message}`); 
             }
@@ -530,7 +531,7 @@ const App = () => {
     }
   };
 
-  // --- IMAGEN INTEGRATION (BYOK ONLY) ---
+  // --- IMAGEN INTEGRATION (FOR HETZNER DEPLOYMENT) ---
   const generateImage = async (shotId) => {
     const activeKey = userApiKey.trim();
     if (!activeKey) {
@@ -547,6 +548,7 @@ const App = () => {
     try {
       for (let i = 0; i < maxRetries; i++) {
         try {
+          // PUBLIC API ENDPOINT: Uses imagen-3.0-generate-001 for production deployment
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${activeKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
