@@ -426,8 +426,8 @@ const App = () => {
           const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
-          // THE FIX: Fully qualified model ID for 100% routing certainty.
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${activeKey}`, {
+          // THE FIX: Point directly to the standard public production model 
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           });
           
@@ -811,17 +811,17 @@ const App = () => {
                   <div className="flex flex-wrap gap-2 mt-4">
                     <button onClick={() => setViewMode('storyboard')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'storyboard' ? 'bg-zinc-100 text-zinc-950' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>STORYBOARD</button>
                     <button onClick={() => shootPlan.length > 0 ? setViewMode('shoot-plan') : optimizeShootOrder()} disabled={!isRealUser && shootPlan.length === 0 || isAIBusy} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full flex items-center gap-2 ${viewMode === 'shoot-plan' ? 'bg-orange-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'} disabled:opacity-50`}>
-                      {loadingStates.optimizing ? <Loader2 size={10} className="animate-spin" /> : (!isRealUser && shootPlan.length === 0 ? <Lock size={10} /> : <Zap size={10} />)} SHOOT PLAN
-                    </button>
-                    <button onClick={() => setViewMode('script')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'script' ? 'bg-blue-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>
-                      SCRIPT
-                    </button>
-                    <button onClick={() => setViewMode('print')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 hidden sm:flex items-center gap-1 hover:text-white transition-colors"><FileText size={10} /> PLAN</button>
-                    <button onClick={() => setViewMode('print-boards')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 hidden sm:flex items-center gap-1 hover:text-white transition-colors"><Layout size={10} /> BOARDS</button>
-                  </div>
+                    {loadingStates.optimizing ? <Loader2 size={10} className="animate-spin" /> : (!isRealUser && shootPlan.length === 0 ? <Lock size={10} /> : <Zap size={10} />)} SHOOT PLAN
+                  </button>
+                  <button onClick={() => setViewMode('script')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'script' ? 'bg-blue-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>
+                    SCRIPT
+                  </button>
+                  <button onClick={() => setViewMode('print')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 flex items-center gap-1 hover:text-white transition-colors"><FileText size={10} /> PLAN</button>
+                  <button onClick={() => setViewMode('print-boards')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 flex items-center gap-1 hover:text-white transition-colors"><Layout size={10} /> BOARDS</button>
                 </div>
+              </div>
 
-                <div className="flex flex-row flex-wrap xl:flex-nowrap gap-2 items-center w-full xl:w-auto mt-2 xl:mt-0">
+              <div className="flex flex-row flex-wrap xl:flex-nowrap gap-2 items-center w-full xl:w-auto mt-2 xl:mt-0">
                   <button onClick={generateAISHots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-purple-900/20 whitespace-nowrap">
                     {loadingStates.genShots ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <Sparkles size={14} />)} BUILD LIST
                   </button>
