@@ -22,8 +22,8 @@ import {
 // --- ENVIRONMENT INITIALIZATION & SAFE KEY EXTRACTION ---
 let firebaseConfig = {};
 let globalGeminiKey = "";
-let globalTextModel = "gemini-2.5-flash"; // Default Fallback
-let globalImageModel = "imagen-3.0-generate-001"; // Default Fallback
+let globalTextModel = "gemini-2.5-flash"; 
+let globalImageModel = "imagen-3.0-generate-001"; 
 
 if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
@@ -72,24 +72,32 @@ const App = () => {
   const [isGuest, setIsGuest] = useState(false);
   const isRealUser = user && !user.isAnonymous;
 
+  // ONBOARDING PROJECT STATE
   const [sketches, setSketches] = useState([
     { 
-      id: '1', title: 'The Hot Dog Suit Incident', 
-      premise: 'A guy attends a deeply serious funeral but gets stuck in his mascot uniform.',
-      settingType: 'INT.', location: 'FUNERAL HOME', timeOfDay: 'DAY',
-      tone: 'Disruptive / Cringe', imageStyle: 'Pencil Sketch',
+      id: '1', title: 'Welcome to SketchShot 🎬', 
+      premise: 'A director discovers a digital production rig that does the heavy lifting of pre-production, allowing them to visualize their absurd ideas instantly.',
+      settingType: 'INT.', location: 'THE EDIT BAY', timeOfDay: 'NIGHT',
+      tone: 'Cinematic', imageStyle: 'Pencil Sketch',
       characterProfiles: [
-        { id: 'c1', name: 'Greg', age: 42, gender: 85, melanin: 20, archetype: 'The Neurotic', desc: 'Sweaty, deeply defensive. Wearing a full-body hot dog suit with a broken industrial zipper.', image: null },
-        { id: 'c2', name: 'The Hot Dog Man', age: 60, gender: 95, melanin: 70, archetype: 'The Straight Man', desc: 'A rival mascot who takes his job way too seriously.', image: null },
+        { id: 'c1', name: 'The Director', age: 35, gender: 50, melanin: 50, archetype: 'The Neurotic', desc: 'Staring at a blank screen, waiting for inspiration to strike.', image: null },
+        { id: 'c2', name: 'The AI', age: 1, gender: 50, melanin: 50, archetype: 'The Wildcard', desc: 'A chaotic but helpful collaborative partner.', image: null },
       ],
-      props: 'Casket, Mustard, Industrial Zipper, Floral Arrangement',
-      hook: 'Main character arrives at a somber funeral wearing a full-body hot dog costume.', escalation: 'He claims he can\'t take it off because of a "zipper tragedy" and starts getting defensive about the mustard stains.', ending: 'The pallbearers realize the casket is also shaped like a giant bun.', script: ''
+      props: 'Coffee cup, Mechanical keyboard, Production binder',
+      hook: 'The Director is staring at a blank page. The deadline is tomorrow.', escalation: 'They open SketchShot and realize they can generate an entire shot list with one click.', ending: 'They export the PDF boards and finally get some sleep.', script: ''
     }
   ]);
   const [activeSketchId, setActiveSketchId] = useState(localStorage.getItem('sketchshot_active_sketch') || '1');
-  const [shots, setShots] = useState([]);
+  const [shots, setShots] = useState([
+    { id: 's1', sketchId: '1', number: 1, type: 'Wide', cameraMove: 'Locked Off', subject: 'THE DASHBOARD', action: 'Welcome to SketchShot! The key details of your sketch live right up there under the title. \n\nClick the "SCENE CONFIG" tab to change your location, comedic tone, and visual style.', notes: 'Keep the premise simple. The AI uses it to build everything else.', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: [] },
+    { id: 's2', sketchId: '1', number: 2, type: 'Medium', cameraMove: 'Whip Pan', subject: 'CHARACTER BIBLE', action: 'Switch to the Character Bible tab to add your talent. \n\nThe AI remembers your characters\' archetypes and uses them when it writes dialogue or blocks the scene.', notes: 'Upload an avatar for each character so you remember their vibe.', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: ['The Director'] },
+    { id: 's3', sketchId: '1', number: 3, type: 'Close Up', cameraMove: 'Crash Zoom', subject: 'THE AI SPARKLE', action: 'See those little purple sparkle icons? Click them to have the AI act as your co-writer. \n\nIt uses "Yes, And..." logic, meaning it builds ON whatever text you\'ve already typed into the box.', dialogue: 'Wait, I don\'t have to write this myself?', notes: '', fx: false, image: null, locationCaveat: '', shotCharacters: ['The Director', 'The AI'] },
+    { id: 's4', sketchId: '1', number: 4, type: 'Insert', cameraMove: 'Handheld / Shaky', subject: 'IMAGE GENERATION', action: 'Paste your personal Gemini API key into the sidebar (Luddite Mode must be off).\n\nThen click the GENERATE button on any shot card to hallucinate a storyboard frame based on your Art Style.', notes: 'Make sure you pick an Art Style in the Scene Config!', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: [] },
+    { id: 's5', sketchId: '1', number: 5, type: 'Wide', cameraMove: 'Dolly Tracking', subject: 'EXPORT & SHOOT', action: 'When you are done, click the PRINT or BOARDS tabs to see your printable layouts.\n\nYou can also generate an Optimized Shoot Plan that groups your shots by location and camera setup.', notes: 'Time to go make a movie.', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: [] }
+  ]);
+  
   const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
-  const [viewMode, setViewMode] = useState('scene'); 
+  const [viewMode, setViewMode] = useState('storyboard'); 
   const [shootPlan, setShootPlan] = useState([]);
   const [loadingStates, setLoadingStates] = useState({});
   const [isAIBusy, setIsAIBusy] = useState(false); 
@@ -383,7 +391,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "3.1", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "3.2", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -825,24 +833,34 @@ const App = () => {
 
         {/* CLOUD SYNC & BYOK PANEL */}
         <div className="border-t border-zinc-800 bg-zinc-950/50 flex flex-col">
+          
+          {/* LUDDITE MODE TOGGLE */}
           <div className="p-4 border-b border-zinc-800/50">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center gap-2">
                 {aiEnabled ? <Sparkles size={14}/> : <EyeOff size={14} className="text-zinc-500"/>} 
                 <span className={aiEnabled ? 'text-purple-500' : 'text-zinc-500'}>AI Assistant</span>
               </span>
-              <button onClick={toggleAiState} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${aiEnabled ? 'bg-purple-600' : 'bg-zinc-700'}`}>
+              <button 
+                onClick={toggleAiState}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${aiEnabled ? 'bg-purple-600' : 'bg-zinc-700'}`}
+              >
                 <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${aiEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
               </button>
             </div>
           </div>
 
+          {/* BYOK: Bring Your Own Key Section (Hides if AI is disabled) */}
           {aiEnabled && (
             <div className="p-4 border-b border-zinc-800/50 space-y-3 bg-zinc-900/30">
               <div className="text-[9px] text-zinc-500 leading-tight">Paste your personal Gemini API key here to bypass shared rate limits.</div>
               <input 
-                type="password" value={userApiKey}
-                onChange={(e) => { setUserApiKey(e.target.value); localStorage.setItem('sketchshot_gemini_key', e.target.value); }}
+                type="password" 
+                value={userApiKey}
+                onChange={(e) => {
+                  setUserApiKey(e.target.value);
+                  localStorage.setItem('sketchshot_gemini_key', e.target.value);
+                }}
                 placeholder="Enter Gemini Key..." 
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:outline-none focus:border-purple-500"
               />
@@ -884,6 +902,7 @@ const App = () => {
         </button>
 
         <div className="flex-1 overflow-y-auto w-full">
+          {/* REDESIGNED NAVIGATION HEADER */}
           <header className="p-4 md:p-6 border-b border-zinc-800 bg-zinc-950 md:bg-zinc-950/90 md:backdrop-blur-xl sticky top-0 z-20 w-full shrink-0 shadow-lg">
             <div className="max-w-6xl mx-auto flex flex-col gap-4">
               
@@ -892,7 +911,16 @@ const App = () => {
                 <input value={activeSketch?.title || ''} onChange={(e) => updateSketch(activeSketchId, 'title', e.target.value)} className="bg-transparent text-2xl md:text-4xl font-black focus:outline-none w-full tracking-tighter truncate" placeholder="Title..." />
               </div>
               
-              <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar pb-2">
+              {/* KEY DETAILS LOCKED UNDER TITLE */}
+              <div className="flex flex-wrap items-center gap-3 md:gap-4 text-[10px] md:text-xs font-bold text-zinc-500 mb-2">
+                <span className="text-orange-500 flex items-center gap-1 shrink-0"><Map size={12}/> {formattedSceneHeading}</span>
+                <span className="text-purple-400 flex items-center gap-1 shrink-0"><VenetianMask size={12}/> {activeSketch?.tone || 'No Tone'}</span>
+                <span className="text-blue-400 flex items-center gap-1 shrink-0"><ImageIcon size={12}/> {activeSketch?.imageStyle || 'Pencil Sketch'}</span>
+                <span className="text-green-400 truncate max-w-[150px] sm:max-w-sm flex items-center gap-1"><Users size={12}/> {availableCharacters.join(', ') || 'No Characters'}</span>
+              </div>
+              
+              {/* HORIZONTAL TAB NAVIGATION */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-zinc-800/50">
                 <button onClick={() => setViewMode('scene')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'scene' ? 'bg-orange-500 text-white shadow-lg shadow-orange-900/20' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}>
                   <Settings2 size={14}/> SCENE CONFIG
                 </button>
@@ -911,8 +939,11 @@ const App = () => {
                 <button onClick={() => shootPlan.length > 0 ? setViewMode('shoot-plan') : optimizeShootOrder()} disabled={!isRealUser && shootPlan.length === 0 || isAIBusy} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all disabled:opacity-50 ${viewMode === 'shoot-plan' ? 'bg-yellow-500 text-black shadow-lg' : 'text-zinc-500 border border-zinc-800 hover:text-white'}`}>
                   {loadingStates.optimizing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} SHOOT PLAN
                 </button>
-                <button onClick={() => setViewMode('print')} className="flex items-center gap-1 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all text-zinc-500 border border-zinc-800 hover:text-white">
-                  <Printer size={14} /> PRINT
+                <button onClick={() => setViewMode('print-boards')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'print-boards' ? 'bg-zinc-100 text-zinc-950 shadow-lg' : 'text-zinc-500 hover:bg-zinc-900 hover:text-white border border-zinc-800'}`}>
+                  <Layout size={14} /> BOARDS
+                </button>
+                <button onClick={() => setViewMode('print')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'print' ? 'bg-zinc-100 text-zinc-950 shadow-lg' : 'text-zinc-500 hover:bg-zinc-900 hover:text-white border border-zinc-800'}`}>
+                  <Printer size={14} /> PRINT LIST
                 </button>
               </div>
 
@@ -928,6 +959,7 @@ const App = () => {
                   <h2 className="text-xl md:text-2xl font-black uppercase tracking-tighter text-orange-500 flex items-center gap-2"><Settings2 size={24} /> Scene Configuration</h2>
                 </div>
 
+                {/* THE PREMISE SEED */}
                 <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner">
                   <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
                     <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> The Premise (Idea)</span>
