@@ -6,7 +6,7 @@ import {
   X, Download, Upload, Save, Maximize2, Map, 
   ChevronUp, ChevronDown, 
   UserPlus, ArrowUp, ArrowDown, Cloud, GitBranch, LogOut, Lock, Copy, Menu,
-  ScrollText, VenetianMask, Clapperboard, Key
+  ScrollText, VenetianMask, Clapperboard, Key, EyeOff, Eye
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -46,6 +46,7 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchshot-app';
 
 const SHOT_TYPES = ['Wide', 'Medium', 'Close Up', 'POV', 'Over the Shoulder', 'Insert', 'Drone', 'Tracking'];
 const TONES = ['Absurdist', 'Disruptive / Cringe', 'Deadpan', 'Slapstick', 'Satire', 'Surreal', 'Mockumentary', 'Cinematic'];
+const IMAGE_STYLES = ['Pencil Sketch', 'Photographic', 'Cinematic', 'Comic Book', 'Watercolor', '3D Render', 'Vintage Film'];
 
 const App = () => {
   // --- AUTH STATE ---
@@ -59,7 +60,7 @@ const App = () => {
     { 
       id: '1', title: 'The Hot Dog Suit Incident', 
       settingType: 'INT.', location: 'FUNERAL HOME', timeOfDay: 'DAY',
-      tone: 'Disruptive / Cringe', 
+      tone: 'Disruptive / Cringe', imageStyle: 'Pencil Sketch',
       characterProfiles: [
         { id: 'c1', name: 'Greg', desc: 'Sweaty, deeply defensive. Wearing a full-body hot dog suit with a broken industrial zipper.' },
         { id: 'c2', name: 'The Hot Dog Man', desc: 'A rival mascot who takes his job way too seriously.' },
@@ -82,8 +83,9 @@ const App = () => {
   const [sketchToDelete, setSketchToDelete] = useState(null);
   const fileInputRef = useRef(null);
 
-  // --- BYOK (Bring Your Own Key) STATE ---
+  // --- AI PREFERENCES (BYOK & Luddite Mode) ---
   const [userApiKey, setUserApiKey] = useState(localStorage.getItem('sketchshot_gemini_key') || '');
+  const [aiEnabled, setAiEnabled] = useState(localStorage.getItem('sketchshot_ai_enabled') !== 'false');
 
   const [isSyncing, setIsSyncing] = useState(false);
   const isInitialLoad = useRef({ sketches: true, shots: true });
@@ -157,6 +159,12 @@ const App = () => {
     try { await signInWithPopup(auth, provider); } catch (err) { console.error("Login failed:", err); }
   };
 
+  const toggleAiState = () => {
+    const newState = !aiEnabled;
+    setAiEnabled(newState);
+    localStorage.setItem('sketchshot_ai_enabled', newState.toString());
+  };
+
   // ==========================================
   // AUTH GUARD: REQUIRE LOGIN OR GUEST MODE
   // ==========================================
@@ -188,14 +196,6 @@ const App = () => {
             <button onClick={() => setIsGuest(true)} className="w-full flex justify-center items-center gap-3 px-4 py-3 sm:py-4 text-xs font-black bg-transparent hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 rounded-2xl transition-all mt-2">
               CONTINUE AS GUEST (Manual Mode)
             </button>
-          </div>
-          
-          <div className="pt-2">
-            <p className="text-[9px] sm:text-[10px] text-zinc-600 uppercase tracking-widest font-bold mb-3">AI Features Require Login</p>
-            <p className="text-[9px] text-orange-500/80 font-bold max-w-[250px] mx-auto leading-tight border border-orange-500/20 bg-orange-500/5 p-2 rounded-lg">
-              <AlertCircle size={10} className="inline mr-1 -mt-0.5"/> 
-              If you opened this from a social app, tap the dots in the corner and select "Open in System Browser" to log in.
-            </p>
           </div>
         </div>
       </div>
@@ -234,7 +234,7 @@ const App = () => {
     const updatedSketches = sketches.filter(s => s.id !== id);
     if (updatedSketches.length === 0) {
       const newId = Date.now().toString();
-      updatedSketches.push({ id: newId, title: 'New Sketch', settingType: 'INT.', location: 'LOCATION', timeOfDay: 'DAY', tone: 'Absurdist', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' });
+      updatedSketches.push({ id: newId, title: 'New Sketch', settingType: 'INT.', location: 'LOCATION', timeOfDay: 'DAY', tone: 'Absurdist', imageStyle: 'Pencil Sketch', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' });
       setActiveSketchId(newId);
     } else if (activeSketchId === id) {
       setActiveSketchId(updatedSketches[0].id);
@@ -273,7 +273,6 @@ const App = () => {
   const updateChar = (charId, field, value) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.map(p => p.id === charId ? { ...p, [field]: value } : p));
   const removeChar = (charId) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.filter(p => p.id !== charId));
 
-  // The Downsampler
   const handleImageUpload = (shotId, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -346,7 +345,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "2.0", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "2.1", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -409,7 +408,6 @@ const App = () => {
 
   // --- THE FULLY QUALIFIED AI ENGINE ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
-    // Clean the key just in case an invisible space was copied/pasted
     const activeKey = (userApiKey || apiKey).trim();
     
     if (!activeKey) {
@@ -426,7 +424,7 @@ const App = () => {
           const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`, {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${activeKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           });
           
@@ -613,7 +611,7 @@ const App = () => {
     } catch(err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: false })); }
   };
 
-  // --- COLORED PENCIL PROMPT FIX ---
+  // --- DYNAMIC IMAGE STYLE PROMPTS ---
   const getShotPrompt = (shot) => {
     const charContext = shot.shotCharacters?.length > 0 
       ? shot.shotCharacters.map(n => {
@@ -623,12 +621,21 @@ const App = () => {
       : richCharactersContext;
 
     const location = shot.locationCaveat || formattedSceneHeading;
+    const style = activeSketch?.imageStyle || 'Pencil Sketch';
     
-    let prompt = `Rough storyboard sketch, mixed media graphite and colored pencil. A ${shot.type} shot of ${shot.subject}. Location: ${location}. `;
+    let stylePrefix = "Rough storyboard sketch, mixed media graphite and colored pencil.";
+    if (style === 'Photographic') stylePrefix = "High-resolution photograph, photorealistic, 85mm lens.";
+    else if (style === 'Cinematic') stylePrefix = "Cinematic movie still, anamorphic lens, dramatic lighting, highly detailed.";
+    else if (style === 'Comic Book') stylePrefix = "Comic book panel, ink outlines, vivid colors, graphic novel style.";
+    else if (style === 'Watercolor') stylePrefix = "Expressive watercolor painting, loose artistic brush strokes.";
+    else if (style === '3D Render') stylePrefix = "High-quality 3D render, stylized but detailed, cinematic lighting.";
+    else if (style === 'Vintage Film') stylePrefix = "Vintage 35mm film still, grainy, retro color grading, nostalgic aesthetic.";
+
+    let prompt = `${stylePrefix} A ${shot.type} shot of ${shot.subject}. Location: ${location}. `;
     if (shot.action) prompt += `Action: ${shot.action} `;
     if (charContext) prompt += `Featuring: ${charContext}. `;
     if (shot.notes) prompt += `Visual Notes: ${shot.notes}. `;
-    prompt += `Cinematic composition, rough hand-drawn style. PURE ARTWORK ONLY. NO TEXT, NO WORDS, NO TITLES, NO WATERMARKS in the image.`;
+    prompt += `PURE ARTWORK ONLY. NO TEXT, NO WORDS, NO TITLES, NO WATERMARKS in the image.`;
     return prompt;
   };
 
@@ -791,28 +798,44 @@ const App = () => {
               </button>
             </div>
           ))}
-          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Sketch', settingType: 'INT.', location: 'LOCATION', timeOfDay: 'DAY', tone: 'Absurdist', characters: '', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW SKETCH</button>
+          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Sketch', settingType: 'INT.', location: 'LOCATION', timeOfDay: 'DAY', tone: 'Absurdist', imageStyle: 'Pencil Sketch', characters: '', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW SKETCH</button>
         </nav>
 
         {/* CLOUD SYNC & BYOK PANEL */}
         <div className="border-t border-zinc-800 bg-zinc-950/50 flex flex-col">
-          {/* BYOK: Bring Your Own Key Section */}
-          <div className="p-4 border-b border-zinc-800/50 space-y-3">
-            <div className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center gap-2">
-              <Key size={14} /> AI Settings
+          
+          {/* LUDDITE MODE TOGGLE */}
+          <div className="p-4 border-b border-zinc-800/50">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center gap-2">
+                {aiEnabled ? <Sparkles size={14}/> : <EyeOff size={14} className="text-zinc-500"/>} 
+                <span className={aiEnabled ? 'text-purple-500' : 'text-zinc-500'}>AI Assistant</span>
+              </span>
+              <button 
+                onClick={toggleAiState}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${aiEnabled ? 'bg-purple-600' : 'bg-zinc-700'}`}
+              >
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${aiEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
+              </button>
             </div>
-            <p className="text-[9px] text-zinc-500 leading-tight">Paste your own Gemini API key here to bypass the shared rate limits.</p>
-            <input 
-              type="password" 
-              value={userApiKey}
-              onChange={(e) => {
-                setUserApiKey(e.target.value);
-                localStorage.setItem('sketchshot_gemini_key', e.target.value);
-              }}
-              placeholder="Enter Gemini Key..." 
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-zinc-300 focus:outline-none focus:border-purple-500"
-            />
           </div>
+
+          {/* BYOK: Bring Your Own Key Section (Hides if AI is disabled) */}
+          {aiEnabled && (
+            <div className="p-4 border-b border-zinc-800/50 space-y-3 bg-zinc-900/30">
+              <div className="text-[9px] text-zinc-500 leading-tight">Paste your personal Gemini API key here to bypass shared rate limits.</div>
+              <input 
+                type="password" 
+                value={userApiKey}
+                onChange={(e) => {
+                  setUserApiKey(e.target.value);
+                  localStorage.setItem('sketchshot_gemini_key', e.target.value);
+                }}
+                placeholder="Enter Gemini Key..." 
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:outline-none focus:border-purple-500"
+              />
+            </div>
+          )}
 
           <div className="p-4 space-y-3">
             <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
@@ -872,13 +895,17 @@ const App = () => {
                   </div>
                 </div>
 
-                <div className="flex flex-row flex-wrap xl:flex-nowrap gap-2 items-center w-full xl:w-auto mt-2 xl:mt-0">
-                  <button onClick={generateAISHots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-purple-900/20 whitespace-nowrap">
-                    {loadingStates.genShots ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <Sparkles size={14} />)} BUILD LIST
-                  </button>
-                  <button onClick={generateScript} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-blue-900/20 whitespace-nowrap">
-                    {loadingStates.script ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <ScrollText size={14} />)} WRITE SCRIPT
-                  </button>
+                <div className="flex flex-row flex-wrap xl:flex-nowrap gap-2 items-center w-full xl:w-auto mt-2 xl:mt-0 justify-end">
+                  {aiEnabled && (
+                    <>
+                      <button onClick={generateAISHots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-purple-900/20 whitespace-nowrap">
+                        {loadingStates.genShots ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <Sparkles size={14} />)} BUILD LIST
+                      </button>
+                      <button onClick={generateScript} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-blue-900/20 whitespace-nowrap">
+                        {loadingStates.script ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <ScrollText size={14} />)} WRITE SCRIPT
+                      </button>
+                    </>
+                  )}
                   <button onClick={() => setIsDetailsExpanded(!isDetailsExpanded)} className="p-3 md:p-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-full text-zinc-400 transition-colors border border-zinc-700 shrink-0">
                     {isDetailsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                   </button>
@@ -889,6 +916,7 @@ const App = () => {
                 <div className="flex flex-wrap items-center gap-3 md:gap-4 text-[10px] md:text-xs font-bold text-zinc-500 mt-4 md:mt-6 border-t border-zinc-800/50 pt-4">
                   <span className="text-orange-500 flex items-center gap-1 shrink-0"><Map size={12}/> {formattedSceneHeading}</span>
                   <span className="text-purple-400 flex items-center gap-1 shrink-0"><VenetianMask size={12}/> {activeSketch?.tone || 'No Tone'}</span>
+                  <span className="text-blue-400 flex items-center gap-1 shrink-0"><ImageIcon size={12}/> {activeSketch?.imageStyle || 'Pencil Sketch'}</span>
                   <span className="text-green-400 truncate max-w-[150px] sm:max-w-sm flex items-center gap-1"><UserPlus size={12}/> {availableCharacters.join(', ') || 'No Characters'}</span>
                 </div>
               )}
@@ -900,14 +928,16 @@ const App = () => {
                       <div key={beat} className="space-y-2">
                         <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between">
                           <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> The {beat}</span>
-                          <button onClick={() => generateNarrativeBeat(beat)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-orange-500/20 rounded transition-colors disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Sparkles size={12} className="text-orange-500" />}</button>
+                          {aiEnabled && (
+                            <button onClick={() => generateNarrativeBeat(beat)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-orange-500/20 rounded transition-colors disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Sparkles size={12} className="text-orange-500" />}</button>
+                          )}
                         </label>
                         <textarea value={activeSketch?.[beat] || ''} onChange={(e) => updateSketch(activeSketchId, beat, e.target.value)} className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none min-h-[80px] resize-none" />
                       </div>
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800 w-full">
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-4 bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800 w-full">
                     <div className="space-y-1 sm:col-span-2">
                       <span className="text-[9px] font-black text-zinc-600 uppercase">Scene Heading</span>
                       <div className="flex bg-zinc-950/50 rounded-xl border border-zinc-800 focus-within:border-orange-500/50 overflow-hidden shadow-inner">
@@ -925,6 +955,12 @@ const App = () => {
                       <span className="text-[9px] font-black text-zinc-600 uppercase flex items-center gap-1"><VenetianMask size={10}/> Tone</span>
                       <select value={activeSketch?.tone || 'Absurdist'} onChange={(e) => updateSketch(activeSketchId, 'tone', e.target.value)} className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-2.5 text-sm focus:outline-none font-bold cursor-pointer [&>option]:bg-zinc-900">
                         {TONES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-black text-zinc-600 uppercase flex items-center gap-1"><ImageIcon size={10}/> Style</span>
+                      <select value={activeSketch?.imageStyle || 'Pencil Sketch'} onChange={(e) => updateSketch(activeSketchId, 'imageStyle', e.target.value)} className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-2.5 text-sm focus:outline-none font-bold cursor-pointer [&>option]:bg-zinc-900">
+                        {IMAGE_STYLES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
@@ -950,9 +986,11 @@ const App = () => {
                           </div>
                           <div className="relative">
                             <textarea value={char.desc || ''} onChange={(e) => updateChar(char.id, 'desc', e.target.value)} placeholder="Vibe, wardrobe, fatal flaw..." className="w-full bg-zinc-950/50 rounded-xl p-3 text-xs text-zinc-400 resize-none focus:outline-none border border-zinc-800/50 focus:border-green-500/30 h-20" />
-                            <button onClick={() => generateCharDesc(char.id)} disabled={!isRealUser || isAIBusy} className="absolute bottom-2 right-2 p-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-green-400 transition-colors disabled:opacity-50" title="Generate character flaw">
-                              {loadingStates[`char-${char.id}`] ? <Loader2 size={10} className="animate-spin text-green-500" /> : (!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />)}
-                            </button>
+                            {aiEnabled && (
+                              <button onClick={() => generateCharDesc(char.id)} disabled={!isRealUser || isAIBusy} className="absolute bottom-2 right-2 p-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-green-400 transition-colors disabled:opacity-50" title="Generate character flaw">
+                                {loadingStates[`char-${char.id}`] ? <Loader2 size={10} className="animate-spin text-green-500" /> : (!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />)}
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -1019,20 +1057,22 @@ const App = () => {
                                     <Upload size={10} /> UPLOAD
                                     <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(shot.id, e)} />
                                   </label>
-                                  <div className="flex gap-2">
-                                    <button onClick={() => setVisiblePromptId(shot.id)} className="text-[9px] font-black text-zinc-600 hover:text-purple-400 flex items-center gap-1 transition-colors uppercase tracking-widest bg-zinc-900 px-3 py-1.5 rounded border border-zinc-800">
-                                      <FileText size={10} /> PROMPT
-                                    </button>
-                                    <button 
-                                      onClick={() => generateImage(shot.id)} 
-                                      disabled={!isPersonalKeyActive || loadingStates[`image-${shot.id}`]}
-                                      className={`text-[9px] font-black flex items-center gap-1 transition-colors uppercase tracking-widest px-3 py-1.5 rounded border ${isPersonalKeyActive ? 'text-zinc-300 bg-purple-600/20 border-purple-500/30 hover:bg-purple-600 hover:text-white' : 'text-zinc-600 bg-zinc-900 border-zinc-800 opacity-50'}`}
-                                      title={!isPersonalKeyActive ? "Requires personal API Key in sidebar" : "Generate Image"}
-                                    >
-                                      {loadingStates[`image-${shot.id}`] ? <Loader2 size={10} className="animate-spin text-purple-400" /> : (!isPersonalKeyActive ? <Lock size={10} /> : <Sparkles size={10} />)} 
-                                      GENERATE
-                                    </button>
-                                  </div>
+                                  {aiEnabled && (
+                                    <div className="flex gap-2">
+                                      <button onClick={() => setVisiblePromptId(shot.id)} className="text-[9px] font-black text-zinc-600 hover:text-purple-400 flex items-center gap-1 transition-colors uppercase tracking-widest bg-zinc-900 px-3 py-1.5 rounded border border-zinc-800">
+                                        <FileText size={10} /> PROMPT
+                                      </button>
+                                      <button 
+                                        onClick={() => generateImage(shot.id)} 
+                                        disabled={!isPersonalKeyActive || loadingStates[`image-${shot.id}`]}
+                                        className={`text-[9px] font-black flex items-center gap-1 transition-colors uppercase tracking-widest px-3 py-1.5 rounded border ${isPersonalKeyActive ? 'text-zinc-300 bg-purple-600/20 border-purple-500/30 hover:bg-purple-600 hover:text-white' : 'text-zinc-600 bg-zinc-900 border-zinc-800 opacity-50'}`}
+                                        title={!isPersonalKeyActive ? "Requires personal API Key in sidebar" : "Generate Image"}
+                                      >
+                                        {loadingStates[`image-${shot.id}`] ? <Loader2 size={10} className="animate-spin text-purple-400" /> : (!isPersonalKeyActive ? <Lock size={10} /> : <Sparkles size={10} />)} 
+                                        GENERATE
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -1074,7 +1114,10 @@ const App = () => {
                         
                         <div className="space-y-2 w-full">
                           <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-                            <button onClick={() => generateTextAssist(shot.id, 'action', 'Director blocking physical comedy.', `Shot Subject: ${shot.subject}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-orange-500/20 rounded disabled:opacity-50 shrink-0">{loadingStates[`action-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Clapperboard size={12} className="text-orange-500" />)}</button> Action / Blocking
+                            {aiEnabled && (
+                              <button onClick={() => generateTextAssist(shot.id, 'action', 'Director blocking physical comedy.', `Shot Subject: ${shot.subject}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-orange-500/20 rounded disabled:opacity-50 shrink-0">{loadingStates[`action-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Clapperboard size={12} className="text-orange-500" />)}</button>
+                            )}
+                            Action / Blocking
                           </div>
                           <textarea value={shot.action || ''} onChange={(e) => updateShot(shot.id, 'action', e.target.value)} className="w-full bg-zinc-950/50 rounded-[1.5rem] p-4 text-xs text-zinc-300 min-h-[80px] md:min-h-[60px] focus:outline-none border border-zinc-800/50 focus:border-orange-500/50 resize-y" />
                         </div>
@@ -1082,13 +1125,19 @@ const App = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 w-full">
                           <div className="space-y-2 w-full">
                             <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-                              <button onClick={() => generateTextAssist(shot.id, 'dialogue', 'Writer drafting dialogue.', `Subject: ${shot.subject}, Action: ${shot.action}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-purple-500/20 rounded disabled:opacity-50 shrink-0">{loadingStates[`dialogue-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} className="text-purple-500" /> : <Quote size={12} className="text-purple-500" />)}</button> Dialogue / Improv
+                              {aiEnabled && (
+                                <button onClick={() => generateTextAssist(shot.id, 'dialogue', 'Writer drafting dialogue.', `Subject: ${shot.subject}, Action: ${shot.action}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-purple-500/20 rounded disabled:opacity-50 shrink-0">{loadingStates[`dialogue-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} className="text-purple-500" /> : <Quote size={12} className="text-purple-500" />)}</button>
+                              )}
+                              Dialogue / Improv
                             </div>
                             <textarea value={shot.dialogue || ''} onChange={(e) => updateShot(shot.id, 'dialogue', e.target.value)} className="w-full bg-zinc-950/50 rounded-[1.5rem] p-4 text-xs text-zinc-200 min-h-[100px] focus:outline-none border border-zinc-800/50 focus:border-purple-500/50 resize-y" />
                           </div>
                           <div className="space-y-2 w-full">
                             <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
-                              <button onClick={() => generateTextAssist(shot.id, 'notes', 'DP advising on camera/light.', `Type: ${shot.type}, Subject: ${shot.subject}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-blue-500/20 rounded disabled:opacity-50 shrink-0">{loadingStates[`notes-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} className="text-blue-500" /> : <Wand2 size={12} className="text-blue-500" />)}</button> Director Notes
+                              {aiEnabled && (
+                                <button onClick={() => generateTextAssist(shot.id, 'notes', 'DP advising on camera/light.', `Type: ${shot.type}, Subject: ${shot.subject}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-blue-500/20 rounded disabled:opacity-50 shrink-0">{loadingStates[`notes-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} className="text-blue-500" /> : <Wand2 size={12} className="text-blue-500" />)}</button>
+                              )}
+                              Director Notes
                             </div>
                             <textarea value={shot.notes || ''} onChange={(e) => updateShot(shot.id, 'notes', e.target.value)} className="w-full bg-zinc-950/50 rounded-[1.5rem] p-4 text-xs text-zinc-400 min-h-[100px] focus:outline-none border border-zinc-800/50 focus:border-blue-500/50 resize-y italic" />
                           </div>
@@ -1105,12 +1154,14 @@ const App = () => {
                 <button onClick={addShot} className="w-full py-8 border-2 border-dashed border-zinc-800 rounded-[2rem] md:rounded-[3rem] text-zinc-600 hover:text-orange-500 hover:border-orange-500/50 hover:bg-orange-500/5 transition-all flex flex-col items-center justify-center gap-3 font-black tracking-widest group">
                   <div className="bg-zinc-900 group-hover:bg-orange-500/20 p-4 rounded-full"><Plus size={24} className="text-zinc-500 group-hover:text-orange-500" /></div> ADD NEW SHOT
                 </button>
-                <button onClick={generateSingleAIShot} disabled={!isRealUser || isAIBusy} className="w-full py-8 border-2 border-dashed border-purple-900/50 rounded-[2rem] md:rounded-[3rem] text-purple-600/50 hover:text-purple-400 hover:border-purple-500/50 hover:bg-purple-500/5 transition-all flex flex-col items-center justify-center gap-3 font-black tracking-widest group disabled:opacity-50">
-                  <div className="bg-purple-900/20 group-hover:bg-purple-500/20 p-4 rounded-full">
-                    {loadingStates.singleAIShot ? <Loader2 size={24} className="animate-spin text-purple-500" /> : (!isRealUser ? <Lock size={24} /> : <Sparkles size={24} className="text-purple-500 group-hover:text-purple-400" />)}
-                  </div> 
-                  AUTO-FILL NEXT SHOT
-                </button>
+                {aiEnabled && (
+                  <button onClick={generateSingleAIShot} disabled={!isRealUser || isAIBusy} className="w-full py-8 border-2 border-dashed border-purple-900/50 rounded-[2rem] md:rounded-[3rem] text-purple-600/50 hover:text-purple-400 hover:border-purple-500/50 hover:bg-purple-500/5 transition-all flex flex-col items-center justify-center gap-3 font-black tracking-widest group disabled:opacity-50">
+                    <div className="bg-purple-900/20 group-hover:bg-purple-500/20 p-4 rounded-full">
+                      {loadingStates.singleAIShot ? <Loader2 size={24} className="animate-spin text-purple-500" /> : (!isRealUser ? <Lock size={24} /> : <Sparkles size={24} className="text-purple-500 group-hover:text-purple-400" />)}
+                    </div> 
+                    AUTO-FILL NEXT SHOT
+                  </button>
+                )}
               </div>
             )}
             <div className="h-32" />
