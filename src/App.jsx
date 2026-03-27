@@ -452,8 +452,9 @@ const App = () => {
     }
   };
 
-  // --- THE BULLETPROOF AI ENGINE (1.5 Flash) ---
+  // --- THE FULLY QUALIFIED AI ENGINE ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
+    // Clean the key just in case an invisible space was copied/pasted
     const activeKey = (userApiKey || apiKey).trim();
     
     if (!activeKey) {
@@ -470,6 +471,7 @@ const App = () => {
           const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
+          // THE FIX: Pointing to the stable, public 1.5-flash model (sandbox models 404 on live API keys)
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           });
@@ -498,8 +500,7 @@ const App = () => {
       setIsAIBusy(false); 
     }
   };
-
-  // --- IMAGEN 4.0 INTEGRATION (BYOK ONLY) ---
+  // --- IMAGEN INTEGRATION (BYOK ONLY) ---
   const generateImage = async (shotId) => {
     const activeKey = userApiKey.trim();
     if (!activeKey) {
@@ -516,7 +517,8 @@ const App = () => {
     try {
       for (let i = 0; i < maxRetries; i++) {
         try {
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${activeKey}`, {
+          // THE FIX: Public API uses Imagen 3.0. Imagen 4.0 is sandbox-only and will 404.
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${activeKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
