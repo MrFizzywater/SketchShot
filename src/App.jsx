@@ -346,7 +346,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "1.9", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "2.0", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -426,7 +426,6 @@ const App = () => {
           const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
-          // THE FIX: Point directly to the standard public production model 
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           });
@@ -453,6 +452,58 @@ const App = () => {
       }
     } finally {
       setIsAIBusy(false); 
+    }
+  };
+
+  // --- IMAGEN 4.0 INTEGRATION (BYOK ONLY) ---
+  const generateImage = async (shotId) => {
+    const activeKey = userApiKey.trim();
+    if (!activeKey) {
+      alert("You need to enter your own personal Gemini API Key in the sidebar Settings to generate images.");
+      return;
+    }
+
+    setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: true }));
+    const shot = shots.find(s => s.id === shotId);
+    const promptText = getShotPrompt(shot);
+
+    const maxRetries = 6; let delay = 3000;
+    
+    try {
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${activeKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instances: { prompt: promptText },
+              parameters: { sampleCount: 1 }
+            })
+          });
+
+          if (response.status === 429) throw new Error("429");
+          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+
+          const result = await response.json();
+          const imageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+          updateShot(shotId, 'image', imageUrl);
+          break; 
+          
+        } catch (error) {
+          if (i === maxRetries - 1) {
+            if (error.message === "429") {
+               alert(`Union Break! The Image AI hit a rate limit. Give it 30 seconds to breathe.`); 
+            } else {
+               alert(`Image Error: ${error.message}`); 
+            }
+            throw error; 
+          }
+          await new Promise(r => setTimeout(r, delay)); 
+          delay *= 1.5; 
+        }
+      }
+    } finally {
+      setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: false }));
     }
   };
 
@@ -811,17 +862,17 @@ const App = () => {
                   <div className="flex flex-wrap gap-2 mt-4">
                     <button onClick={() => setViewMode('storyboard')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'storyboard' ? 'bg-zinc-100 text-zinc-950' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>STORYBOARD</button>
                     <button onClick={() => shootPlan.length > 0 ? setViewMode('shoot-plan') : optimizeShootOrder()} disabled={!isRealUser && shootPlan.length === 0 || isAIBusy} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full flex items-center gap-2 ${viewMode === 'shoot-plan' ? 'bg-orange-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'} disabled:opacity-50`}>
-                    {loadingStates.optimizing ? <Loader2 size={10} className="animate-spin" /> : (!isRealUser && shootPlan.length === 0 ? <Lock size={10} /> : <Zap size={10} />)} SHOOT PLAN
-                  </button>
-                  <button onClick={() => setViewMode('script')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'script' ? 'bg-blue-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>
-                    SCRIPT
-                  </button>
-                  <button onClick={() => setViewMode('print')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 flex items-center gap-1 hover:text-white transition-colors"><FileText size={10} /> PLAN</button>
-                  <button onClick={() => setViewMode('print-boards')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 flex items-center gap-1 hover:text-white transition-colors"><Layout size={10} /> BOARDS</button>
+                      {loadingStates.optimizing ? <Loader2 size={10} className="animate-spin" /> : (!isRealUser && shootPlan.length === 0 ? <Lock size={10} /> : <Zap size={10} />)} SHOOT PLAN
+                    </button>
+                    <button onClick={() => setViewMode('script')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'script' ? 'bg-blue-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>
+                      SCRIPT
+                    </button>
+                    <button onClick={() => setViewMode('print')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 flex items-center gap-1 hover:text-white transition-colors"><FileText size={10} /> PLAN</button>
+                    <button onClick={() => setViewMode('print-boards')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 flex items-center gap-1 hover:text-white transition-colors"><Layout size={10} /> BOARDS</button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex flex-row flex-wrap xl:flex-nowrap gap-2 items-center w-full xl:w-auto mt-2 xl:mt-0">
+                <div className="flex flex-row flex-wrap xl:flex-nowrap gap-2 items-center w-full xl:w-auto mt-2 xl:mt-0">
                   <button onClick={generateAISHots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 md:px-6 py-3 md:py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-purple-900/20 whitespace-nowrap">
                     {loadingStates.genShots ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <Sparkles size={14} />)} BUILD LIST
                   </button>
@@ -932,6 +983,7 @@ const App = () => {
                 
                 {currentDisplayList.map((shot, index) => {
                   const currentPrompt = getShotPrompt(shot);
+                  const isPersonalKeyActive = userApiKey.trim().length > 0;
                   
                   return (
                   <div key={shot.id} className={`group bg-zinc-900/40 border ${shot.fx ? 'border-orange-500/40' : 'border-zinc-800'} rounded-[2rem] md:rounded-[3rem] p-5 md:p-10 hover:bg-zinc-900/60 transition-all relative overflow-hidden mb-6 md:mb-8`}>
@@ -951,23 +1003,36 @@ const App = () => {
                           ) : (
                             <div className="text-center p-4 md:p-6 w-full">
                               {visiblePromptId === shot.id ? (
-                                <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-xl text-left relative animate-in fade-in zoom-in-95 duration-200 shadow-xl">
-                                  <button onClick={() => setVisiblePromptId(null)} className="absolute top-2 right-2 p-1 text-zinc-500 hover:text-white bg-zinc-800 rounded-full"><X size={10} /></button>
-                                  <p className="text-[9px] text-zinc-400 mb-2 font-mono pr-4 h-24 overflow-y-auto leading-relaxed select-all">
-                                    {currentPrompt}
-                                  </p>
+                                <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-xl text-left relative animate-in fade-in zoom-in-95 duration-200 shadow-xl flex flex-col h-full justify-between">
+                                  <div>
+                                    <button onClick={() => setVisiblePromptId(null)} className="absolute top-2 right-2 p-1 text-zinc-500 hover:text-white bg-zinc-800 rounded-full"><X size={10} /></button>
+                                    <p className="text-[9px] text-zinc-400 mb-2 font-mono pr-4 h-20 overflow-y-auto leading-relaxed select-all">
+                                      {currentPrompt}
+                                    </p>
+                                  </div>
                                   <button onClick={() => copyPrompt(currentPrompt)} className="w-full bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-black py-2 rounded flex items-center justify-center gap-1 transition-colors"><Copy size={10} /> COPY PROMPT</button>
                                 </div>
                               ) : (
                                 <div className="flex flex-col items-center gap-3">
                                   <ImageIcon className="text-zinc-800 mx-auto" size={32} />
                                   <label className="text-[10px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 hover:border-orange-500/50 hover:bg-orange-500/10 px-4 py-2 rounded-full flex items-center gap-2 cursor-pointer transition-all">
-                                    <Upload size={10} /> UPLOAD IMAGE
+                                    <Upload size={10} /> UPLOAD
                                     <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(shot.id, e)} />
                                   </label>
-                                  <button onClick={() => setVisiblePromptId(shot.id)} className="text-[9px] font-black text-zinc-600 hover:text-purple-400 flex items-center gap-1 transition-colors uppercase tracking-widest">
-                                    <Sparkles size={10} /> GET AI PROMPT
-                                  </button>
+                                  <div className="flex gap-2">
+                                    <button onClick={() => setVisiblePromptId(shot.id)} className="text-[9px] font-black text-zinc-600 hover:text-purple-400 flex items-center gap-1 transition-colors uppercase tracking-widest bg-zinc-900 px-3 py-1.5 rounded border border-zinc-800">
+                                      <FileText size={10} /> PROMPT
+                                    </button>
+                                    <button 
+                                      onClick={() => generateImage(shot.id)} 
+                                      disabled={!isPersonalKeyActive || loadingStates[`image-${shot.id}`]}
+                                      className={`text-[9px] font-black flex items-center gap-1 transition-colors uppercase tracking-widest px-3 py-1.5 rounded border ${isPersonalKeyActive ? 'text-zinc-300 bg-purple-600/20 border-purple-500/30 hover:bg-purple-600 hover:text-white' : 'text-zinc-600 bg-zinc-900 border-zinc-800 opacity-50'}`}
+                                      title={!isPersonalKeyActive ? "Requires personal API Key in sidebar" : "Generate Image"}
+                                    >
+                                      {loadingStates[`image-${shot.id}`] ? <Loader2 size={10} className="animate-spin text-purple-400" /> : (!isPersonalKeyActive ? <Lock size={10} /> : <Sparkles size={10} />)} 
+                                      GENERATE
+                                    </button>
+                                  </div>
                                 </div>
                               )}
                             </div>
