@@ -237,10 +237,9 @@ const App = () => {
   
   const formattedSceneHeading = `${activeSketch?.settingType || 'INT.'} ${activeSketch?.location || 'LOCATION'} - ${activeSketch?.timeOfDay || 'DAY'}`;
 
+  // Safe fallback to prevent crashes if characters field is missing
   const activeProfiles = activeSketch?.characterProfiles || [];
   const availableCharacters = activeProfiles.map(c => c.name);
-  
-  // Translating all the sliders into plain English for the AI
   const richCharactersContext = activeProfiles.map(c => {
     let details = [];
     if (c.age) details.push(`${c.age}yo`);
@@ -452,7 +451,7 @@ const App = () => {
     }
   };
 
-  // --- THE BULLETPROOF AI ENGINE (2.5 Flash) ---
+  // --- THE FULLY QUALIFIED AI ENGINE ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
     const activeKey = (userApiKey || apiKey).trim();
     
@@ -470,7 +469,6 @@ const App = () => {
           const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
-          // THE FIX: Upgrading back to the modern 2.5-flash endpoint now that your paid key is active
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           });
@@ -517,8 +515,7 @@ const App = () => {
     try {
       for (let i = 0; i < maxRetries; i++) {
         try {
-          // THE FIX: Public API uses Imagen 3.0. Imagen 4.0 is sandbox-only and will 404.
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${activeKey}`, {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${activeKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -622,7 +619,6 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, script: false })); }
   };
 
-  // --- THE "YES, AND" FIX ---
   const generateTextAssist = async (shotId, field, rolePrompt, contextPrompt) => {
     setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: true }));
     const shot = shots.find(s => s.id === shotId);
@@ -647,7 +643,6 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [beatType]: false })); }
   };
 
-  // --- THE "YES, AND" FIX FOR CHARACTERS ---
   const generateCharDesc = async (charId) => {
     setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: true }));
     const char = activeProfiles.find(c => c.id === charId);
@@ -659,7 +654,6 @@ const App = () => {
     } catch(err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: false })); }
   };
 
-  // --- DYNAMIC IMAGE STYLE PROMPTS ---
   const getShotPrompt = (shot) => {
     const charContext = shot.shotCharacters?.length > 0 
       ? shot.shotCharacters.map(n => {
@@ -939,8 +933,8 @@ const App = () => {
                     <button onClick={() => setViewMode('script')} className={`text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full ${viewMode === 'script' ? 'bg-blue-500 text-white' : 'text-zinc-500 bg-zinc-900/50 md:bg-transparent'}`}>
                       SCRIPT
                     </button>
-                    <button onClick={() => setViewMode('print')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 flex items-center gap-1 hover:text-white transition-colors"><FileText size={10} /> PLAN</button>
-                    <button onClick={() => setViewMode('print-boards')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 flex items-center gap-1 hover:text-white transition-colors"><Layout size={10} /> BOARDS</button>
+                    <button onClick={() => setViewMode('print')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 hidden sm:flex items-center gap-1 hover:text-white transition-colors"><FileText size={10} /> PLAN</button>
+                    <button onClick={() => setViewMode('print-boards')} className="text-[10px] font-black px-4 py-2 md:py-1.5 rounded-full text-zinc-500 border border-zinc-800 hidden sm:flex items-center gap-1 hover:text-white transition-colors"><Layout size={10} /> BOARDS</button>
                   </div>
                 </div>
 
@@ -955,6 +949,9 @@ const App = () => {
                       </button>
                     </>
                   )}
+                  <button onClick={() => setIsDetailsExpanded(!isDetailsExpanded)} className="p-3 md:p-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-full text-zinc-400 transition-colors border border-zinc-700 shrink-0">
+                    {isDetailsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
                 </div>
               </div>
 
