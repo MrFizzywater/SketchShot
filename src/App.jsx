@@ -88,6 +88,7 @@ const App = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const isInitialLoad = useRef({ sketches: true, shots: true });
   const [boardCols, setBoardCols] = useState(2);
+  const apiKey = globalGeminiKey; 
 
   // --- STRICT AUTHENTICATION BOOT ---
   useEffect(() => {
@@ -406,7 +407,7 @@ const App = () => {
     }
   };
 
-  // --- THE BULLETPROOF AI ENGINE (1.5 Flash) ---
+  // --- THE FULLY QUALIFIED AI ENGINE ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
     // Clean the key just in case an invisible space was copied/pasted
     const activeKey = (userApiKey || apiKey).trim();
@@ -425,8 +426,8 @@ const App = () => {
           const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
-          // Using 1.5-flash: Massive free-tier limits, avoids instant 429 Quota errors from preview/pro models
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`, {
+          // THE FIX: Fully qualified model ID for 100% routing certainty.
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${activeKey}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           });
           
