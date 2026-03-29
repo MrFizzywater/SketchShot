@@ -50,10 +50,12 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchshot-app';
 
 const SHOT_TYPES = ['Wide', 'Medium', 'Close Up', 'POV', 'Over the Shoulder', 'Insert', 'Drone', 'Tracking'];
 const CAMERA_MOVES = ['Locked Off', 'Handheld / Shaky', 'Slow Creep In', 'Slow Creep Out', 'Crash Zoom', 'Whip Pan', 'Dolly Tracking', 'Dutch Angle', 'Crane Up', 'Crane Down'];
-const TONES = ['Absurdist', 'Disruptive / Cringe', 'Deadpan', 'Slapstick', 'Satire', 'Surreal', 'Mockumentary', 'Cinematic'];
 const IMAGE_STYLES = ['Pencil Sketch', 'Photographic', 'Cinematic', 'Comic Book', 'Watercolor', '3D Render', 'Vintage Film'];
-const COMEDY_ARCHETYPES = ['The Straight Man', 'The Wildcard', 'The Neurotic', 'The Himbo / Bimbo', 'The Agent of Chaos', 'The Deadpan', 'The Instigator', 'The Oblivious One'];
 const ASPECT_RATIOS = [{label: '16:9 (Widescreen)', val: '16:9'}, {label: '1:1 (Square)', val: '1:1'}, {label: '4:3 (Standard)', val: '4:3'}, {label: '9:16 (Vertical)', val: '9:16'}, {label: '3:4 (Portrait)', val: '3:4'}];
+
+// Expanded robust lists
+const TONES = ['Absurdist', 'Disruptive / Cringe', 'Deadpan', 'Slapstick', 'Satire', 'Surreal', 'Mockumentary', 'Cinematic', 'Dark Comedy', 'Screwball', 'High Concept', 'Mumblecore', 'None', 'Other'];
+const COMEDY_ARCHETYPES = ['The Straight Man', 'The Wildcard', 'The Neurotic', 'The Himbo / Bimbo', 'The Agent of Chaos', 'The Deadpan', 'The Instigator', 'The Oblivious One', 'The Cynic', 'The Over-Enthusiast', 'The Voice of Reason', 'The Fall Guy', 'None', 'Other'];
 
 const getGenderText = (val) => {
   if (val < 35) return "Femme-presenting";
@@ -109,7 +111,9 @@ const App = () => {
   
   const [fullResImages, setFullResImages] = useState({});
   const [userApiKey, setUserApiKey] = useState(localStorage.getItem('sketchshot_gemini_key') || '');
-  const [aiEnabled, setAiEnabled] = useState(localStorage.getItem('sketchshot_ai_enabled') !== 'false');
+  
+  // AI is disabled by default for new users (null === 'true' is false)
+  const [aiEnabled, setAiEnabled] = useState(localStorage.getItem('sketchshot_ai_enabled') === 'true');
 
   const [isSyncing, setIsSyncing] = useState(false);
   const isInitialLoad = useRef({ sketches: true, shots: true });
@@ -392,7 +396,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "3.3", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "3.4", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -669,12 +673,12 @@ const App = () => {
     else if (style === '3D Render') stylePrefix = "High-quality 3D render, stylized but detailed, cinematic lighting.";
     else if (style === 'Vintage Film') stylePrefix = "Vintage 35mm film still, grainy, retro color grading, nostalgic aesthetic.";
 
-    let prompt = `${stylePrefix} A ${shot.type} shot of ${shot.subject}. Location: ${location}. `;
-    if (shot.cameraMove !== 'Locked Off') prompt += `Camera movement: ${shot.cameraMove}. `;
+    let prompt = `Sketch Context: ${activeSketch?.premise || activeSketch?.title}. Focus on creating a storyboard panel for THIS SPECIFIC SHOT: A ${shot.type} shot of ${shot.subject}. Location: ${location}. `;
+    if (shot.cameraMove !== 'Locked Off') prompt += `Framed for a ${shot.cameraMove} camera movement. `;
     if (shot.action) prompt += `Action: ${shot.action} `;
     if (charContext) prompt += `Featuring: ${charContext}. `;
     if (shot.notes) prompt += `Visual Notes: ${shot.notes}. `;
-    prompt += `PURE ARTWORK ONLY. NO TEXT, NO WORDS, NO TITLES, NO WATERMARKS in the image.`;
+    prompt += `${stylePrefix} PURE ARTWORK ONLY. NO TEXT, NO WORDS, NO TITLES, NO WATERMARKS in the image.`;
     return prompt;
   };
 
@@ -982,6 +986,20 @@ const App = () => {
                   <textarea value={activeSketch?.premise || ''} onChange={(e) => updateSketch(activeSketchId, 'premise', e.target.value)} placeholder="Describe the basic concept here to act as a seed for the AI... (e.g. A guy attends a deeply serious funeral but gets stuck in his mascot uniform.)" className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 md:p-6 text-sm focus:outline-none focus:border-orange-500/50 min-h-[100px] resize-y text-zinc-200" />
                 </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+                  {['hook', 'escalation', 'ending'].map((beat) => (
+                    <div key={beat} className="space-y-2 bg-zinc-900/30 p-5 rounded-[2rem] border border-zinc-800/50">
+                      <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
+                        <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> The {beat}</span>
+                        {aiEnabled && (
+                          <button onClick={() => generateNarrativeBeat(beat)} disabled={!isRealUser || isAIBusy} className="p-1.5 hover:bg-orange-500/20 rounded transition-colors disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Sparkles size={12} className="text-orange-500" />}</button>
+                        )}
+                      </label>
+                      <textarea value={activeSketch?.[beat] || ''} onChange={(e) => updateSketch(activeSketchId, beat, e.target.value)} className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-4 text-sm focus:outline-none focus:border-orange-500/50 min-h-[120px] resize-none text-zinc-300" />
+                    </div>
+                  ))}
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 bg-zinc-900/20 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800 shadow-inner">
                   <div className="space-y-2 sm:col-span-2 lg:col-span-5">
                     <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Scene Heading</span>
@@ -998,9 +1016,12 @@ const App = () => {
                   </div>
                   <div className="space-y-2">
                     <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-1"><VenetianMask size={12}/> Tone</span>
-                    <select value={activeSketch?.tone || 'Absurdist'} onChange={(e) => updateSketch(activeSketchId, 'tone', e.target.value)} className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none font-bold cursor-pointer text-purple-400 [&>option]:bg-zinc-900">
+                    <select value={TONES.includes(activeSketch?.tone) ? activeSketch?.tone : 'Other'} onChange={(e) => updateSketch(activeSketchId, 'tone', e.target.value)} className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none font-bold cursor-pointer text-purple-400 [&>option]:bg-zinc-900">
                       {TONES.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
+                    {activeSketch?.tone === 'Other' || (!TONES.includes(activeSketch?.tone) && activeSketch?.tone) ? (
+                      <input value={activeSketch?.tone === 'Other' ? '' : activeSketch?.tone} onChange={(e) => updateSketch(activeSketchId, 'tone', e.target.value)} placeholder="Type custom tone..." className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none font-bold text-purple-400 mt-2 shadow-inner" />
+                    ) : null}
                   </div>
                   <div className="space-y-2">
                     <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-1"><ImageIcon size={12}/> Art Style</span>
@@ -1018,20 +1039,6 @@ const App = () => {
                     <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Key Props</span>
                     <input value={activeSketch?.props || ''} onChange={(e) => updateSketch(activeSketchId, 'props', e.target.value)} placeholder="Mustard, Casket..." className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-3 text-sm focus:outline-none font-bold italic h-[46px] text-zinc-300" />
                   </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-                  {['hook', 'escalation', 'ending'].map((beat) => (
-                    <div key={beat} className="space-y-2 bg-zinc-900/30 p-5 rounded-[2rem] border border-zinc-800/50">
-                      <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
-                        <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> The {beat}</span>
-                        {aiEnabled && (
-                          <button onClick={() => generateNarrativeBeat(beat)} disabled={!isRealUser || isAIBusy} className="p-1.5 hover:bg-orange-500/20 rounded transition-colors disabled:opacity-50">{!isRealUser ? <Lock size={12} className="text-orange-500" /> : <Sparkles size={12} className="text-orange-500" />}</button>
-                        )}
-                      </label>
-                      <textarea value={activeSketch?.[beat] || ''} onChange={(e) => updateSketch(activeSketchId, beat, e.target.value)} className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl p-4 text-sm focus:outline-none focus:border-orange-500/50 min-h-[120px] resize-none text-zinc-300" />
-                    </div>
-                  ))}
                 </div>
               </div>
             )}
@@ -1059,9 +1066,12 @@ const App = () => {
                         </div>
                         <div className="flex-1 space-y-2">
                            <input value={char.name || ''} onChange={(e) => updateChar(char.id, 'name', e.target.value)} placeholder="Character Name" className="bg-transparent text-2xl font-black focus:outline-none text-zinc-100 w-full placeholder-zinc-800 border-b border-zinc-800 focus:border-green-500 pb-1" />
-                           <select value={char.archetype || 'The Wildcard'} onChange={(e) => updateChar(char.id, 'archetype', e.target.value)} className="bg-zinc-950 text-green-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-zinc-800 focus:outline-none cursor-pointer w-full appearance-none">
+                           <select value={COMEDY_ARCHETYPES.includes(char.archetype) ? char.archetype : 'Other'} onChange={(e) => updateChar(char.id, 'archetype', e.target.value)} className="bg-zinc-950 text-green-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-zinc-800 focus:outline-none cursor-pointer w-full appearance-none">
                               {COMEDY_ARCHETYPES.map(a => <option key={a} value={a}>{a}</option>)}
                            </select>
+                           {char.archetype === 'Other' || (!COMEDY_ARCHETYPES.includes(char.archetype) && char.archetype) ? (
+                              <input value={char.archetype === 'Other' ? '' : char.archetype} onChange={(e) => updateChar(char.id, 'archetype', e.target.value)} placeholder="Type custom archetype..." className="bg-zinc-950 text-green-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-zinc-800 focus:outline-none w-full mt-2 shadow-inner" />
+                           ) : null}
                         </div>
                       </div>
 
@@ -1330,7 +1340,12 @@ const App = () => {
                       <h2 className="text-xl md:text-2xl font-black uppercase tracking-tighter text-yellow-500 flex items-center gap-2"><Zap size={24}/> Optimized Shoot Plan</h2>
                       <p className="text-xs text-yellow-500/60 mt-1">Grouped by location, type, and talent to save time on set.</p>
                     </div>
-                    <button onClick={downloadShootPlan} className="w-full sm:w-auto flex justify-center items-center gap-2 px-6 py-2.5 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border border-yellow-500/30 rounded-full text-xs font-black transition-all"><Download size={14} /> SAVE PLAN</button>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <button onClick={optimizeShootOrder} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center items-center gap-2 px-6 py-2.5 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border border-yellow-500/30 rounded-full text-xs font-black transition-all flex">
+                        {loadingStates.optimizing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} REASSESS
+                      </button>
+                      <button onClick={downloadShootPlan} className="flex-1 sm:flex-none justify-center items-center gap-2 px-6 py-2.5 bg-zinc-800 text-yellow-500 hover:bg-zinc-700 border border-zinc-700 rounded-full text-xs font-black transition-all flex"><Download size={14} /> SAVE PLAN</button>
+                    </div>
                   </div>
                 )}
                 {/* Fallback to render shoot plan list, borrowing logic from storyboard but reading from shootPlan array */}
