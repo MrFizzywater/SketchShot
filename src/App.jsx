@@ -106,8 +106,6 @@ const App = () => {
   const [fullResImages, setFullResImages] = useState({});
   const [userApiKey, setUserApiKey] = useState(localStorage.getItem('sketchshot_gemini_key') || '');
   const [aiEnabled, setAiEnabled] = useState(localStorage.getItem('sketchshot_ai_enabled') === 'true');
-
-  // --- UNDO HISTORY STATE ---
   const [history, setHistory] = useState({});
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -125,6 +123,17 @@ const App = () => {
   const currentDisplayList = viewMode === 'shoot-plan' && shootPlan.length > 0 ? shootPlan : activeShots;
   
   const isOriginalAuthor = isWritersRoom && activeSketch?.originalAuthorId === user?.uid;
+  const formattedSceneHeading = `${activeSketch?.settingType || 'INT.'} ${activeSketch?.location || 'LOCATION'} - ${activeSketch?.timeOfDay || 'DAY'}`;
+  const activeProfiles = activeSketch?.characterProfiles || [];
+  const availableCharacters = activeProfiles.map(c => c.name);
+  const richCharactersContext = activeProfiles.map(c => {
+    let details = [];
+    if (c.age) details.push(`${c.age}yo`);
+    if (c.archetype) details.push(c.archetype);
+    if (c.gender !== undefined) details.push(getGenderText(c.gender));
+    if (c.melanin !== undefined) details.push(getSkinText(c.melanin));
+    return `${c.name}${details.length > 0 ? ` [${details.join(', ')}]` : ''}${c.desc ? ` - ${c.desc}` : ''}`;
+  }).join(' | ');
 
   useEffect(() => {
     if (activeSketchId) localStorage.setItem('sketchshot_active_sketch', activeSketchId);
@@ -194,49 +203,109 @@ const App = () => {
     localStorage.setItem('sketchshot_ai_enabled', newState.toString());
   };
 
-  if (!authResolved) return <div className="h-screen bg-zinc-950 flex items-center justify-center"><Loader2 className="animate-spin text-orange-500" size={32} /></div>;
+  // --- STATE MUTATION HELPERS ---
+  const updateContextState = (stateUpdater, isSketch) => {
+    if (isWritersRoom) {
+      if (isSketch) setPublicSketches(stateUpdater); else setPublicShots(stateUpdater);
+    } else {
+      if (isSketch) setSketches(stateUpdater); else setShots(stateUpdater);
+    }
+  };
 
-  if (!isRealUser && !isGuest) {
-    return (
-      <div className="h-screen bg-zinc-950 flex items-center justify-center text-zinc-100 font-sans selection:bg-orange-500/30 p-4 sm:p-6 overflow-y-auto">
-        <div className="max-w-sm w-full p-6 sm:p-10 bg-zinc-900/50 border border-zinc-800 rounded-[2rem] sm:rounded-[3rem] text-center space-y-8 sm:space-y-10 backdrop-blur-xl shadow-2xl my-auto">
-          <div className="space-y-4">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-zinc-800 rounded-full flex items-center justify-center mx-auto border-4 border-zinc-900 shadow-inner">
-              <Camera className="text-orange-500" size={28} />
-            </div>
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-black tracking-tighter">SKETCHSHOT</h1>
-              <p className="text-[9px] sm:text-[10px] font-bold tracking-widest text-zinc-500 uppercase mt-1">Production Rig</p>
-            </div>
-          </div>
-          
-          <div className="space-y-3">
-            <button onClick={() => loginWithProvider('google')} className="w-full flex justify-center items-center gap-3 px-4 py-3 sm:py-4 text-xs font-black bg-zinc-100 hover:bg-white text-zinc-900 rounded-2xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5">CONTINUE WITH GOOGLE</button>
-            <button onClick={() => loginWithProvider('github')} className="w-full flex justify-center items-center gap-3 px-4 py-3 sm:py-4 text-xs font-black bg-zinc-800 hover:bg-zinc-700 text-white rounded-2xl transition-all border border-zinc-700 hover:border-zinc-500 shadow-lg hover:shadow-xl hover:-translate-y-0.5"><GitBranch size={16} /> CONTINUE WITH GITHUB</button>
-            <button onClick={() => setIsGuest(true)} className="w-full flex justify-center items-center gap-3 px-4 py-3 sm:py-4 text-xs font-black bg-transparent hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 rounded-2xl transition-all mt-2">CONTINUE AS GUEST (Manual Mode)</button>
-          </div>
-          
-          <div className="pt-2">
-            <p className="text-[9px] sm:text-[10px] text-zinc-600 uppercase tracking-widest font-bold mb-3">AI Features Require Login</p>
-            <p className="text-[9px] text-orange-500/80 font-bold max-w-[250px] mx-auto leading-tight border border-orange-500/20 bg-orange-500/5 p-2 rounded-lg"><AlertCircle size={10} className="inline mr-1 -mt-0.5"/> If you opened this from a social app, tap the dots in the corner and select "Open in System Browser" to log in.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const updateSketch = (id, field, value) => {
+    const editorTag = isWritersRoom ? { lastEditedBy: user?.email || 'Guest' } : {};
+    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value, ...editorTag } : s), true);
+  };
+  
+  const updateShot = (id, field, value) => {
+    const editorTag = isWritersRoom ? { lastEditedBy: user?.email || 'Guest' } : {};
+    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value, ...editorTag } : s), false);
+  };
 
-  const formattedSceneHeading = `${activeSketch?.settingType || 'INT.'} ${activeSketch?.location || 'LOCATION'} - ${activeSketch?.timeOfDay || 'DAY'}`;
-  const activeProfiles = activeSketch?.characterProfiles || [];
-  const availableCharacters = activeProfiles.map(c => c.name);
-  const richCharactersContext = activeProfiles.map(c => {
-    let details = [];
-    if (c.age) details.push(`${c.age}yo`);
-    if (c.archetype) details.push(c.archetype);
-    if (c.gender !== undefined) details.push(getGenderText(c.gender));
-    if (c.melanin !== undefined) details.push(getSkinText(c.melanin));
-    return `${c.name}${details.length > 0 ? ` [${details.join(', ')}]` : ''}${c.desc ? ` - ${c.desc}` : ''}`;
-  }).join(' | ');
+  const toggleShotCharacter = (shotId, charName) => {
+    updateContextState(prev => prev.map(s => {
+      if (s.id !== shotId) return s;
+      const currentChars = s.shotCharacters || [];
+      return currentChars.includes(charName) ? { ...s, shotCharacters: currentChars.filter(c => c !== charName) } : { ...s, shotCharacters: [...currentChars, charName] };
+    }), false);
+  };
 
+  const addCharacter = () => updateSketch(activeSketchId, 'characterProfiles', [...activeProfiles, { id: Date.now().toString(), name: 'New Character', age: 30, gender: 50, melanin: 50, archetype: 'The Wildcard', desc: '', image: null }]);
+  const updateChar = (charId, field, value) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.map(p => p.id === charId ? { ...p, [field]: value } : p));
+  const removeChar = (charId) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.filter(p => p.id !== charId));
+
+  const addShot = () => {
+    const nextNumber = activeShots.length > 0 ? Math.max(...activeShots.map(s => s.number)) + 1 : 1;
+    updateContextState(prev => [...prev, { id: (isWritersRoom ? 'pub_' : '') + Date.now().toString(), sketchId: activeSketchId, number: nextNumber, type: 'Medium', cameraMove: 'Locked Off', subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: [] }], false);
+  };
+  
+  const insertShotAt = (index, position) => {
+    const currentActiveShots = [...activeShots];
+    const insertIndex = position === 'before' ? index : index + 1;
+    const newShot = { 
+      id: (isWritersRoom ? 'pub_' : '') + Date.now().toString(), sketchId: activeSketchId, type: 'Medium', cameraMove: 'Locked Off',
+      subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: [] 
+    };
+    currentActiveShots.splice(insertIndex, 0, newShot);
+    currentActiveShots.forEach((s, i) => s.number = i + 1);
+    updateContextState(prev => {
+      const otherShots = prev.filter(s => s.sketchId !== activeSketchId);
+      return [...otherShots, ...currentActiveShots];
+    }, false);
+  };
+
+  const deleteShot = async (shotId) => {
+    updateContextState(prev => prev.filter(s => s.id !== shotId), false);
+    if (user && isRealUser) {
+      try { 
+        const path = isWritersRoom ? ['public', 'data', 'shared_shots'] : ['users', user.uid, 'shots'];
+        await deleteDoc(doc(db, 'artifacts', appId, ...path, shotId)); 
+      } catch (e) {}
+    }
+  };
+
+  const moveShot = (currentIndex, direction) => {
+    if (viewMode !== 'storyboard') return;
+    const newIndex = currentIndex + direction;
+    if (newIndex < 0 || newIndex >= activeShots.length) return;
+    const currentShot = activeShots[currentIndex];
+    const targetShot = activeShots[newIndex];
+    const currentNumber = currentShot.number;
+    currentShot.number = targetShot.number;
+    targetShot.number = currentNumber;
+    updateContextState(prev => prev.map(s => {
+      if (s.id === currentShot.id) return { ...s, number: currentShot.number };
+      if (s.id === targetShot.id) return { ...s, number: targetShot.number };
+      return s;
+    }), false);
+  };
+
+  const confirmDeleteSketch = async () => {
+    if (!sketchToDelete) return;
+    const id = sketchToDelete.id;
+    const isDeletingShared = id.startsWith('pub_');
+    
+    if (isDeletingShared) {
+      setPublicSketches(prev => prev.filter(s => s.id !== id));
+      setPublicShots(prev => prev.filter(s => s.sketchId !== id));
+      if (activeSketchId === id) setActiveSketchId(sketches[0]?.id || '1');
+      if (user && isRealUser) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_sketches', id));
+    } else {
+      const updatedSketches = sketches.filter(s => s.id !== id);
+      if (updatedSketches.length === 0) {
+        const newId = Date.now().toString();
+        updatedSketches.push({ id: newId, title: 'New Sketch', settingType: 'INT.', location: 'LOCATION', timeOfDay: 'DAY', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', premise: '', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' });
+        setActiveSketchId(newId);
+      } else if (activeSketchId === id) setActiveSketchId(updatedSketches[0].id);
+      
+      setSketches(updatedSketches);
+      setShots(prev => prev.filter(s => s.sketchId !== id));
+      if (user && isRealUser) try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', id)); } catch (err) {}
+    }
+    setSketchToDelete(null);
+  };
+
+  // --- SYNC & COLLAB LOGIC ---
   const pushToCloud = async () => {
     if (!user || !isRealUser) return;
     setIsSyncing(true);
@@ -266,7 +335,6 @@ const App = () => {
     setPublicShots(prev => [...prev, ...pubShots]);
     
     setActiveSketchId(pubId);
-    
     if (isRealUser) {
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_sketches', pubId), pubSketch);
       for (const shot of pubShots) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_shots', shot.id), shot);
@@ -297,11 +365,9 @@ const App = () => {
   const revertWritersRoom = async () => {
     if (!isOriginalAuthor) return;
     if (!window.confirm("WARNING: This will nuke the public Writer's Room branch and overwrite it with your private Master copy. Continue?")) return;
-    
     const privateId = activeSketch.id.replace('pub_', '');
     const privateSketch = sketches.find(s => s.id === privateId);
     const privateShotsLocal = shots.filter(s => s.sketchId === privateId);
-    
     if (!privateSketch) return;
 
     const restoredPubSketch = { ...privateSketch, id: activeSketch.id, originalAuthorId: user.uid, originalAuthorName: user.displayName || user.email };
@@ -319,68 +385,7 @@ const App = () => {
     }
   };
 
-  const updateContextState = (stateUpdater, isSketch) => {
-    if (isWritersRoom) {
-      if (isSketch) setPublicSketches(stateUpdater); else setPublicShots(stateUpdater);
-    } else {
-      if (isSketch) setSketches(stateUpdater); else setShots(stateUpdater);
-    }
-  };
-
-  const updateSketch = (id, field, value) => {
-    const editorTag = isWritersRoom ? { lastEditedBy: user?.email || 'Guest' } : {};
-    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value, ...editorTag } : s), true);
-  };
-  
-  const updateShot = (id, field, value) => {
-    const editorTag = isWritersRoom ? { lastEditedBy: user?.email || 'Guest' } : {};
-    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value, ...editorTag } : s), false);
-  };
-  
-  const confirmDeleteSketch = async () => {
-    if (!sketchToDelete) return;
-    const id = sketchToDelete.id;
-    const isDeletingShared = id.startsWith('pub_');
-    
-    if (isDeletingShared) {
-      setPublicSketches(prev => prev.filter(s => s.id !== id));
-      setPublicShots(prev => prev.filter(s => s.sketchId !== id));
-      if (activeSketchId === id) setActiveSketchId(sketches[0]?.id || '1');
-      if (user && isRealUser) {
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_sketches', id));
-      }
-    } else {
-      const updatedSketches = sketches.filter(s => s.id !== id);
-      if (updatedSketches.length === 0) {
-        const newId = Date.now().toString();
-        updatedSketches.push({ id: newId, title: 'New Sketch', settingType: 'INT.', location: 'LOCATION', timeOfDay: 'DAY', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', premise: '', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' });
-        setActiveSketchId(newId);
-      } else if (activeSketchId === id) setActiveSketchId(updatedSketches[0].id);
-      
-      setSketches(updatedSketches);
-      setShots(prev => prev.filter(s => s.sketchId !== id));
-      
-      if (user && isRealUser) {
-        try {
-          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', id));
-        } catch (err) { console.error(err); }
-      }
-    }
-    setSketchToDelete(null);
-  };
-
-  const toggleShotCharacter = (shotId, charName) => {
-    updateContextState(prev => prev.map(s => {
-      if (s.id !== shotId) return s;
-      const currentChars = s.shotCharacters || [];
-      return currentChars.includes(charName) ? { ...s, shotCharacters: currentChars.filter(c => c !== charName) } : { ...s, shotCharacters: [...currentChars, charName] };
-    }), false);
-  };
-  
-  const addCharacter = () => updateSketch(activeSketchId, 'characterProfiles', [...activeProfiles, { id: Date.now().toString(), name: 'New Character', age: 30, gender: 50, melanin: 50, archetype: 'The Wildcard', desc: '', image: null }]);
-  const updateChar = (charId, field, value) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.map(p => p.id === charId ? { ...p, [field]: value } : p));
-  const removeChar = (charId) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.filter(p => p.id !== charId));
-
+  // --- IMAGE UPLOAD LOGIC ---
   const handleImageUpload = (shotId, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -435,58 +440,9 @@ const App = () => {
     setVisiblePromptId(null); 
   };
 
-  const addShot = () => {
-    const nextNumber = activeShots.length > 0 ? Math.max(...activeShots.map(s => s.number)) + 1 : 1;
-    updateContextState(prev => [...prev, { id: (isWritersRoom ? 'pub_' : '') + Date.now().toString(), sketchId: activeSketchId, number: nextNumber, type: 'Medium', cameraMove: 'Locked Off', subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: [] }], false);
-  };
-  
-  const insertShotAt = (index, position) => {
-    const currentActiveShots = [...activeShots];
-    const insertIndex = position === 'before' ? index : index + 1;
-    
-    const newShot = { 
-      id: (isWritersRoom ? 'pub_' : '') + Date.now().toString(), sketchId: activeSketchId, type: 'Medium', cameraMove: 'Locked Off',
-      subject: '', action: '', notes: '', dialogue: '', fx: false, 
-      image: null, locationCaveat: '', shotCharacters: [] 
-    };
-    
-    currentActiveShots.splice(insertIndex, 0, newShot);
-    currentActiveShots.forEach((s, i) => s.number = i + 1);
-    
-    updateContextState(prev => {
-      const otherShots = prev.filter(s => s.sketchId !== activeSketchId);
-      return [...otherShots, ...currentActiveShots];
-    }, false);
-  };
-
-  const deleteShot = async (shotId) => {
-    updateContextState(prev => prev.filter(s => s.id !== shotId), false);
-    if (user && isRealUser) {
-      try { 
-        const path = isWritersRoom ? ['public', 'data', 'shared_shots'] : ['users', user.uid, 'shots'];
-        await deleteDoc(doc(db, 'artifacts', appId, ...path, shotId)); 
-      } catch (e) {}
-    }
-  };
-
-  const moveShot = (currentIndex, direction) => {
-    if (viewMode !== 'storyboard') return;
-    const newIndex = currentIndex + direction;
-    if (newIndex < 0 || newIndex >= activeShots.length) return;
-    const currentShot = activeShots[currentIndex];
-    const targetShot = activeShots[newIndex];
-    const currentNumber = currentShot.number;
-    currentShot.number = targetShot.number;
-    targetShot.number = currentNumber;
-    updateContextState(prev => prev.map(s => {
-      if (s.id === currentShot.id) return { ...s, number: currentShot.number };
-      if (s.id === targetShot.id) return { ...s, number: targetShot.number };
-      return s;
-    }), false);
-  };
-
+  // --- EXPORT & DOWNLOAD LOGIC ---
   const exportSnapshot = () => {
-    const data = { version: "4.1", timestamp: new Date().toISOString(), sketches, shots, publicSketches, publicShots };
+    const data = { version: "4.2", timestamp: new Date().toISOString(), sketches, shots, publicSketches, publicShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
@@ -494,7 +450,6 @@ const App = () => {
   };
 
   const handleImportClick = () => { if(fileInputRef.current) fileInputRef.current.click(); };
-
   const importSnapshot = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -557,7 +512,7 @@ const App = () => {
     }
   };
 
-  // --- THE AI ENGINE ---
+  // --- AI ENGINE (API LOGIC) ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
     const activeKey = (userApiKey || apiKey).trim();
     if (!activeKey) {
@@ -596,101 +551,36 @@ const App = () => {
     } finally { setIsAIBusy(false); }
   };
 
-  // --- AI ACTIONS WITH UNDO CAPABILITY ---
-  
-  const generateTextAssist = async (shotId, field, rolePrompt, contextPrompt) => {
-    setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: true }));
-    const shot = activeShots.find(s => s.id === shotId);
-    try {
-      const charContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc || n).join(', ') : richCharactersContext;
-      const existing = shot[field] ? `CURRENT TEXT (DO NOT ERASE, ESCALATE THIS): "${shot[field]}"` : `CURRENT TEXT: [Empty]`;
-      const prompt = `Scene: ${formattedSceneHeading}\nPremise: ${activeSketch?.premise}\n${contextPrompt}\nCharacters in shot: ${charContext}\nCamera Move: ${shot.cameraMove}\n${existing}`;
-      const newText = await callGemini(prompt, `${rolePrompt} Apply the 'Yes, And...' rule. If text exists, keep facts and punch it up. CRITICAL: Be extremely concise, direct, and blunt. No flowery prose. 1-2 short sentences max.`, false);
-      if (newText) {
-        setHistory(prev => ({ ...prev, [`shot-${shotId}-${field}`]: shot[field] || '' }));
-        updateShot(shotId, field, newText.trim());
-      }
-    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: false })); }
+  // --- GET SHOT PROMPT MUST BE DEFINED BEFORE IMAGE AI CALLS ---
+  const getShotPrompt = (shot) => {
+    const charContext = shot.shotCharacters?.length > 0 
+      ? shot.shotCharacters.map(n => {
+          const profile = activeProfiles.find(p => p.name === n);
+          if (!profile) return n;
+          return `${n} (${profile.age}yo, ${getGenderText(profile.gender || 50)}, ${getSkinText(profile.melanin || 50)}. ${profile.desc || ''})`;
+        }).join(', ') 
+      : richCharactersContext;
+
+    const location = shot.locationCaveat || formattedSceneHeading;
+    const style = activeSketch?.imageStyle || 'Pencil Sketch';
+    
+    let stylePrefix = "Rough storyboard sketch, mixed media graphite and colored pencil.";
+    if (style === 'Photographic') stylePrefix = "High-resolution photograph, photorealistic, 85mm lens.";
+    else if (style === 'Cinematic') stylePrefix = "Cinematic movie still, anamorphic lens, dramatic lighting, highly detailed.";
+    else if (style === 'Comic Book') stylePrefix = "Comic book panel, ink outlines, vivid colors, graphic novel style.";
+    else if (style === 'Watercolor') stylePrefix = "Expressive watercolor painting, loose artistic brush strokes.";
+    else if (style === '3D Render') stylePrefix = "High-quality 3D render, stylized but detailed, cinematic lighting.";
+    else if (style === 'Vintage Film') stylePrefix = "Vintage 35mm film still, grainy, retro color grading, nostalgic aesthetic.";
+
+    let prompt = `Sketch Context: ${activeSketch?.premise || activeSketch?.title}. Focus on creating a storyboard panel for THIS SPECIFIC SHOT: A ${shot.type} shot of ${shot.subject}. Location: ${location}. `;
+    if (shot.cameraMove !== 'Locked Off') prompt += `Framed for a ${shot.cameraMove} camera movement. `;
+    if (shot.action) prompt += `Action: ${shot.action} `;
+    if (charContext) prompt += `Featuring: ${charContext}. `;
+    if (shot.notes) prompt += `Visual Notes: ${shot.notes}. `;
+    prompt += `${stylePrefix} PURE ARTWORK ONLY. NO TEXT, NO WORDS, NO TITLES, NO WATERMARKS in the image.`;
+    return prompt;
   };
 
-  const revertShotField = (shotId, field) => {
-    const key = `shot-${shotId}-${field}`;
-    if (history[key] !== undefined) {
-      updateShot(shotId, field, history[key]);
-      setHistory(prev => { const h = {...prev}; delete h[key]; return h; });
-    }
-  };
-
-  const generateNarrativeBeat = async (beatType) => {
-    setLoadingStates(prev => ({ ...prev, [beatType]: true }));
-    try {
-      const systemPrompt = `Brilliant comedy writer (${activeSketch?.tone || 'comedic'} humor). Provide a punchy, creative ${beatType} for the sketch. CRITICAL: Be extremely brief and direct. 1-2 short sentences maximum. Zero fluff.`;
-      const prompt = `Title: ${activeSketch?.title}\nScene Heading: ${formattedSceneHeading}\nCharacter Profiles: ${richCharactersContext}\nCurrent Premise: ${activeSketch?.premise}\nCurrent Hook: ${activeSketch?.hook}\nCurrent Escalation: ${activeSketch?.escalation}\nCurrent Ending: ${activeSketch?.ending}\nTask: Write/Improve the ${beatType.toUpperCase()}.`;
-      const newBeat = await callGemini(prompt, systemPrompt, false);
-      if (newBeat) {
-        setHistory(prev => ({ ...prev, [`sketch-${beatType}`]: activeSketch[beatType] || '' }));
-        updateSketch(activeSketchId, beatType, newBeat.trim());
-      }
-    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [beatType]: false })); }
-  };
-
-  const revertSketchField = (field) => {
-    const key = `sketch-${field}`;
-    if (history[key] !== undefined) {
-      updateSketch(activeSketchId, field, history[key]);
-      setHistory(prev => { const h = {...prev}; delete h[key]; return h; });
-    }
-  };
-
-  const generateCharDesc = async (charId) => {
-    setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: true }));
-    const char = activeProfiles.find(c => c.id === charId);
-    try {
-      const existing = char.desc ? `CURRENT DETAILS (YES, AND... THESE): "${char.desc}"\n` : '';
-      const prompt = `Scene: ${formattedSceneHeading}\nPremise: ${activeSketch?.premise}\nSketch Hook: ${activeSketch?.hook}\nCharacter Name: ${char.name}\nCharacter Tropes: ${char.archetype}, ${char.age} years old, ${getGenderText(char.gender)}, ${getSkinText(char.melanin)}\n${existing}Task: Write 1 absurd, highly specific character description or fatal flaw. CRITICAL: Extremely brief, direct, and punchy. No flowery prose. Maximum 15 words.`;
-      const newDesc = await callGemini(prompt, `Expert comedy writer (${activeSketch?.tone || 'comedic'} humor).`, false);
-      if (newDesc) {
-        setHistory(prev => ({ ...prev, [`char-${charId}-desc`]: char.desc || '' }));
-        updateChar(charId, 'desc', newDesc.trim());
-      }
-    } catch(err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: false })); }
-  };
-
-  const revertCharDesc = (charId) => {
-    const key = `char-${charId}-desc`;
-    if (history[key] !== undefined) {
-      updateChar(charId, 'desc', history[key]);
-      setHistory(prev => { const h = {...prev}; delete h[key]; return h; });
-    }
-  };
-
-  // --- AUTO-EXTRACT CHARACTERS ---
-  const extractCharacters = async () => {
-    setLoadingStates(prev => ({ ...prev, extractChars: true }));
-    try {
-      const systemPrompt = `Analyze the scene premise, hook, escalation, and ending. Identify distinct characters mentioned. Return a JSON array of objects with keys: "name" (string), "age" (number 1-100), "gender" (number 0-100, 0=femme, 100=masc), "melanin" (number 0-100, 0=light, 100=dark), "archetype" (choose best match from: ${COMEDY_ARCHETYPES.join(', ')}), "desc" (1 short punchy sentence). Do not invent characters not implied by the text.`;
-      const prompt = `Premise: ${activeSketch.premise}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}`;
-      const extracted = await callGemini(prompt, systemPrompt, true);
-      
-      if (extracted && Array.isArray(extracted) && extracted.length > 0) {
-         const newProfiles = extracted.map(c => ({
-           id: Date.now().toString() + Math.random().toString(36).substring(7),
-           name: c.name || 'Unknown',
-           age: c.age || 30,
-           gender: c.gender || 50,
-           melanin: c.melanin || 50,
-           archetype: COMEDY_ARCHETYPES.includes(c.archetype) ? c.archetype : 'The Wildcard',
-           desc: c.desc || '',
-           image: null
-         }));
-         updateSketch(activeSketchId, 'characterProfiles', [...activeProfiles, ...newProfiles]);
-      } else {
-        alert("No clear characters found to extract.");
-      }
-    } catch(e) { console.error(e); } finally { setLoadingStates(prev => ({ ...prev, extractChars: false })); }
-  };
-
-  // --- IMAGEN GENERATION ---
   const generateImage = async (shotId) => {
     const activeKey = userApiKey.trim();
     if (!activeKey) return alert("You need to enter your own personal Gemini API Key in the sidebar Settings to generate images.");
@@ -791,6 +681,24 @@ const App = () => {
     } finally { setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: false })); }
   };
 
+  const extractCharacters = async () => {
+    setLoadingStates(prev => ({ ...prev, extractChars: true }));
+    try {
+      const systemPrompt = `Analyze the scene premise, hook, escalation, and ending. Identify distinct characters mentioned. Return a JSON array of objects with keys: "name" (string), "age" (number 1-100), "gender" (number 0-100, 0=femme, 100=masc), "melanin" (number 0-100, 0=light, 100=dark), "archetype" (choose best match from: ${COMEDY_ARCHETYPES.join(', ')}), "desc" (1 short punchy sentence). Do not invent characters not implied by the text.`;
+      const prompt = `Premise: ${activeSketch.premise}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}`;
+      const extracted = await callGemini(prompt, systemPrompt, true);
+      
+      if (extracted && Array.isArray(extracted) && extracted.length > 0) {
+         const newProfiles = extracted.map(c => ({
+           id: Date.now().toString() + Math.random().toString(36).substring(7),
+           name: c.name || 'Unknown', age: c.age || 30, gender: c.gender || 50, melanin: c.melanin || 50,
+           archetype: COMEDY_ARCHETYPES.includes(c.archetype) ? c.archetype : 'The Wildcard', desc: c.desc || '', image: null
+         }));
+         updateSketch(activeSketchId, 'characterProfiles', [...activeProfiles, ...newProfiles]);
+      } else alert("No clear characters found to extract.");
+    } catch(e) { console.error(e); } finally { setLoadingStates(prev => ({ ...prev, extractChars: false })); }
+  };
+
   const generateAISHots = async () => {
     setLoadingStates(prev => ({ ...prev, genShots: true }));
     try {
@@ -851,6 +759,73 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, script: false })); }
   };
 
+  const generateTextAssist = async (shotId, field, rolePrompt, contextPrompt) => {
+    setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: true }));
+    const shot = activeShots.find(s => s.id === shotId);
+    try {
+      const charContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc || n).join(', ') : richCharactersContext;
+      const existing = shot[field] ? `CURRENT TEXT (DO NOT ERASE, ESCALATE THIS): "${shot[field]}"` : `CURRENT TEXT: [Empty]`;
+      const prompt = `Scene: ${formattedSceneHeading}\nPremise: ${activeSketch?.premise}\n${contextPrompt}\nCharacters in shot: ${charContext}\nCamera Move: ${shot.cameraMove}\n${existing}`;
+      const newText = await callGemini(prompt, `${rolePrompt} Apply the 'Yes, And...' rule. If text exists, keep facts and punch it up. CRITICAL: Be extremely concise, direct, and blunt. No flowery prose. 1-2 short sentences max.`, false);
+      if (newText) {
+        setHistory(prev => ({ ...prev, [`shot-${shotId}-${field}`]: shot[field] || '' }));
+        updateShot(shotId, field, newText.trim());
+      }
+    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`${field}-${shotId}`]: false })); }
+  };
+
+  const revertShotField = (shotId, field) => {
+    const key = `shot-${shotId}-${field}`;
+    if (history[key] !== undefined) {
+      updateShot(shotId, field, history[key]);
+      setHistory(prev => { const h = {...prev}; delete h[key]; return h; });
+    }
+  };
+
+  const generateNarrativeBeat = async (beatType) => {
+    setLoadingStates(prev => ({ ...prev, [beatType]: true }));
+    try {
+      const systemPrompt = `Brilliant comedy writer (${activeSketch?.tone || 'comedic'} humor). Provide a punchy, creative ${beatType} for the sketch. CRITICAL: Be extremely brief and direct. 1-2 short sentences maximum. Zero fluff.`;
+      const prompt = `Title: ${activeSketch?.title}\nScene Heading: ${formattedSceneHeading}\nCharacter Profiles: ${richCharactersContext}\nCurrent Premise: ${activeSketch?.premise}\nCurrent Hook: ${activeSketch?.hook}\nCurrent Escalation: ${activeSketch?.escalation}\nCurrent Ending: ${activeSketch?.ending}\nTask: Write/Improve the ${beatType.toUpperCase()}.`;
+      const newBeat = await callGemini(prompt, systemPrompt, false);
+      if (newBeat) {
+        setHistory(prev => ({ ...prev, [`sketch-${beatType}`]: activeSketch[beatType] || '' }));
+        updateSketch(activeSketchId, beatType, newBeat.trim());
+      }
+    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [beatType]: false })); }
+  };
+
+  const revertSketchField = (field) => {
+    const key = `sketch-${field}`;
+    if (history[key] !== undefined) {
+      updateSketch(activeSketchId, field, history[key]);
+      setHistory(prev => { const h = {...prev}; delete h[key]; return h; });
+    }
+  };
+
+  const generateCharDesc = async (charId) => {
+    setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: true }));
+    const char = activeProfiles.find(c => c.id === charId);
+    try {
+      const existing = char.desc ? `CURRENT DETAILS (YES, AND... THESE): "${char.desc}"\n` : '';
+      const prompt = `Scene: ${formattedSceneHeading}\nPremise: ${activeSketch?.premise}\nSketch Hook: ${activeSketch?.hook}\nCharacter Name: ${char.name}\nCharacter Tropes: ${char.archetype}, ${char.age} years old, ${getGenderText(char.gender)}, ${getSkinText(char.melanin)}\n${existing}Task: Write 1 absurd, highly specific character description or fatal flaw. CRITICAL: Extremely brief, direct, and punchy. No flowery prose. Maximum 15 words.`;
+      const newDesc = await callGemini(prompt, `Expert comedy writer (${activeSketch?.tone || 'comedic'} humor).`, false);
+      if (newDesc) {
+        setHistory(prev => ({ ...prev, [`char-${charId}-desc`]: char.desc || '' }));
+        updateChar(charId, 'desc', newDesc.trim());
+      }
+    } catch(err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: false })); }
+  };
+
+  const revertCharDesc = (charId) => {
+    const key = `char-${charId}-desc`;
+    if (history[key] !== undefined) {
+      updateChar(charId, 'desc', history[key]);
+      setHistory(prev => { const h = {...prev}; delete h[key]; return h; });
+    }
+  };
+
+  // --- RENDER LOGIC ---
   const gridColsClass = {
     1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4',
   }[boardCols] || 'grid-cols-2';
@@ -924,7 +899,7 @@ const App = () => {
             <div className={`grid ${gridColsClass} gap-6 md:gap-8 w-full print:gap-4`}>
               {currentDisplayList.map((shot, idx) => (
                 <div key={shot.id} className="break-inside-avoid flex flex-col border-2 border-black rounded-lg overflow-hidden bg-white shadow-sm">
-                  <div className="aspect-video border-b-2 border-black bg-zinc-100 flex items-center justify-center relative overflow-hidden">
+                  <div className="aspect-video border-b-2 border-black bg-zinc-100 flex items-center justify-center relative overflow-hidden" style={{ aspectRatio: (activeSketch?.aspectRatio || '16:9').replace(':', '/') }}>
                     {shot.image ? (
                       <img src={shot.image} alt={`Shot ${idx + 1}`} className="w-full h-full object-cover" />
                     ) : (
