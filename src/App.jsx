@@ -48,14 +48,6 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchbeans-app';
 
-// --- PRODUCTION DIAGNOSTICS ---
-console.log("🎬 SketchBeans Rig Booting...");
-console.log("Firebase Config Loaded:", {
-  hasApiKey: !!firebaseConfig?.apiKey,
-  hasAuthDomain: !!firebaseConfig?.authDomain,
-  projectId: firebaseConfig?.projectId || "MISSING"
-});
-
 const SHOT_TYPES = ['Wide', 'Medium', 'Close Up', 'POV', 'Over the Shoulder', 'Insert', 'Drone', 'Tracking'];
 const CAMERA_MOVES = ['Locked Off', 'Handheld / Shaky', 'Slow Creep In', 'Slow Creep Out', 'Crash Zoom', 'Whip Pan', 'Dolly Tracking', 'Dutch Angle', 'Crane Up', 'Crane Down'];
 const IMAGE_STYLES = ['Pencil Sketch', 'Photographic', 'Cinematic', 'Comic Book', 'Watercolor', '3D Render', 'Vintage Film'];
@@ -200,13 +192,28 @@ const App = () => {
     return () => { unsubSketches(); unsubShots(); unsubPubSketches(); unsubPubShots(); };
   }, [isRealUser, user]);
 
+  // --- HARDENED LOGIN LOGIC ---
   const loginWithProvider = async (providerName) => {
+    // 1. Trap missing environment variables before we even try to call Firebase
+    if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('your_key_here')) {
+      alert("🚨 FATAL RIG ERROR: Your Firebase API Key is missing! \n\nVite failed to inject the VITE_FIREBASE_API_KEY environment variable during the build. Go to Coolify, double check the spelling of your variables, and click 'Deploy' to force a fresh build.");
+      return;
+    }
+
     const provider = providerName === 'google' ? new GoogleAuthProvider() : new GithubAuthProvider();
+    
     try { 
       await signInWithPopup(auth, provider); 
     } catch (err) { 
       console.error("Login failed:", err);
-      alert(`Login Error: ${err.message}\n\nMake sure ${providerName} is enabled in your Firebase Auth settings, and double-check your VITE_FIREBASE_AUTH_DOMAIN in Coolify.`);
+      // 2. Trap specific pop-up blocker issues
+      if (err.code === 'auth/popup-blocked') {
+        alert("🛑 POP-UP BLOCKED! Your browser or adblocker just killed the login window. Please allow pop-ups for sketchbeans.fizzywater.ca and try again.");
+      } else if (err.code === 'auth/unauthorized-domain') {
+        alert(`🛑 DOMAIN REJECTED! Firebase doesn't recognize this URL.\n\nGo to Firebase Console > Authentication > Settings > Authorized Domains and ensure sketchbeans.fizzywater.ca is on the list.`);
+      } else {
+        alert(`Login Error (${err.code}): ${err.message}`);
+      }
     }
   };
 
@@ -843,6 +850,10 @@ const App = () => {
     1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4',
   }[boardCols] || 'grid-cols-2';
 
+  if (!authResolved) {
+    return <div className="h-screen bg-zinc-950 flex items-center justify-center"><Loader2 className="animate-spin text-orange-500" size={32} /></div>;
+  }
+
   if (viewMode === 'print' || viewMode === 'print-boards') {
     return (
       <div className="min-h-screen bg-white text-black p-6 md:p-12 font-serif overflow-y-auto">
@@ -951,6 +962,32 @@ const App = () => {
   return (
     <div className="flex h-screen w-full bg-zinc-950 text-zinc-100 font-sans selection:bg-orange-500/30 overflow-hidden relative">
       
+      {/* --- THE TEASER MODAL (FORCED LOGIN GATE) --- */}
+      {!isRealUser && !isGuest && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-500">
+          <div className="max-w-sm w-full p-8 bg-zinc-900 border border-zinc-800 rounded-[3rem] text-center space-y-8 shadow-2xl relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-40 h-40 bg-orange-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            
+            <div className="space-y-4 relative z-10">
+              <div className="w-20 h-20 bg-zinc-950 rounded-full flex items-center justify-center mx-auto border-4 border-zinc-800 shadow-inner">
+                <Camera className="text-orange-500" size={32} />
+              </div>
+              <div>
+                <h1 className="text-3xl font-black tracking-tighter">SKETCHBEANS</h1>
+                <p className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase mt-1">Production Rig</p>
+              </div>
+            </div>
+            
+            <div className="space-y-3 relative z-10">
+              <button onClick={() => loginWithProvider('google')} className="w-full flex justify-center items-center gap-3 px-4 py-4 text-xs font-black bg-zinc-100 hover:bg-white text-zinc-900 rounded-2xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5">CONTINUE WITH GOOGLE</button>
+              <button onClick={() => loginWithProvider('github')} className="w-full flex justify-center items-center gap-3 px-4 py-4 text-xs font-black bg-zinc-800 hover:bg-zinc-700 text-white rounded-2xl transition-all border border-zinc-700 shadow-lg hover:shadow-xl hover:-translate-y-0.5"><GitBranch size={16} /> CONTINUE WITH GITHUB</button>
+              <button onClick={() => setIsGuest(true)} className="w-full flex justify-center items-center gap-3 px-4 py-3 text-[10px] font-black bg-transparent hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 rounded-2xl transition-all mt-4 uppercase tracking-widest border border-dashed border-transparent hover:border-zinc-700">Explore as Guest</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CUSTOM DELETE CONFIRMATION MODAL */}
       {sketchToDelete && (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
