@@ -46,7 +46,7 @@ if (typeof __firebase_config !== 'undefined') {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchshot-app';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchbeans-app';
 
 const SHOT_TYPES = ['Wide', 'Medium', 'Close Up', 'POV', 'Over the Shoulder', 'Insert', 'Drone', 'Tracking'];
 const CAMERA_MOVES = ['Locked Off', 'Handheld / Shaky', 'Slow Creep In', 'Slow Creep Out', 'Crash Zoom', 'Whip Pan', 'Dolly Tracking', 'Dutch Angle', 'Crane Up', 'Crane Down'];
@@ -76,23 +76,23 @@ const App = () => {
 
   // --- LOCAL STATE (PRIVATE) ---
   const [sketches, setSketches] = useState([{ 
-    id: '1', title: 'Welcome to SketchShot 🎬', 
+    id: '1', title: 'Welcome to SketchBeans 🎬', 
     premise: 'A director discovers a digital production rig that does the heavy lifting of pre-production, allowing them to visualize their absurd ideas instantly.',
     settingType: 'INT.', location: 'THE EDIT BAY', timeOfDay: 'NIGHT', tone: 'Cinematic', imageStyle: 'Pencil Sketch', aspectRatio: '16:9',
     characterProfiles: [
       { id: 'c1', name: 'The Director', age: 35, gender: 50, melanin: 50, archetype: 'The Neurotic', desc: 'Staring at a blank screen.', image: null },
       { id: 'c2', name: 'The AI', age: 1, gender: 50, melanin: 50, archetype: 'The Wildcard', desc: 'A chaotic but helpful partner.', image: null },
-    ], props: 'Coffee cup, Mechanical keyboard', hook: 'The Director is staring at a blank page.', escalation: 'They open SketchShot.', ending: 'They get some sleep.', script: ''
+    ], props: 'Coffee cup, Mechanical keyboard', hook: 'The Director is staring at a blank page.', escalation: 'They open SketchBeans.', ending: 'They get some sleep.', script: ''
   }]);
   const [shots, setShots] = useState([
-    { id: 's1', sketchId: '1', number: 1, type: 'Wide', cameraMove: 'Locked Off', subject: 'THE DASHBOARD', action: 'Welcome to SketchShot!', notes: '', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: [] }
+    { id: 's1', sketchId: '1', number: 1, type: 'Wide', cameraMove: 'Locked Off', subject: 'THE DASHBOARD', action: 'Welcome to SketchBeans! The key details of your sketch live right up there under the title. \n\nClick the "SCENE CONFIG" tab to change your location, comedic tone, and visual style.', notes: 'Keep the premise simple. The AI uses it to build everything else.', dialogue: '', fx: false, image: null, locationCaveat: '', shotCharacters: [] }
   ]);
 
   // --- PUBLIC STATE (WRITER'S ROOM) ---
   const [publicSketches, setPublicSketches] = useState([]);
   const [publicShots, setPublicShots] = useState([]);
 
-  const [activeSketchId, setActiveSketchId] = useState(localStorage.getItem('sketchshot_active_sketch') || '1');
+  const [activeSketchId, setActiveSketchId] = useState(localStorage.getItem('sketchbeans_active_sketch') || '1');
   const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
   const [viewMode, setViewMode] = useState('scene'); 
   const [shootPlan, setShootPlan] = useState([]);
@@ -104,8 +104,8 @@ const App = () => {
   const fileInputRef = useRef(null);
   
   const [fullResImages, setFullResImages] = useState({});
-  const [userApiKey, setUserApiKey] = useState(localStorage.getItem('sketchshot_gemini_key') || '');
-  const [aiEnabled, setAiEnabled] = useState(localStorage.getItem('sketchshot_ai_enabled') === 'true');
+  const [userApiKey, setUserApiKey] = useState(localStorage.getItem('sketchbeans_gemini_key') || '');
+  const [aiEnabled, setAiEnabled] = useState(localStorage.getItem('sketchbeans_ai_enabled') === 'true');
   const [history, setHistory] = useState({});
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -136,7 +136,7 @@ const App = () => {
   }).join(' | ');
 
   useEffect(() => {
-    if (activeSketchId) localStorage.setItem('sketchshot_active_sketch', activeSketchId);
+    if (activeSketchId) localStorage.setItem('sketchbeans_active_sketch', activeSketchId);
   }, [activeSketchId]);
 
   useEffect(() => {
@@ -200,7 +200,7 @@ const App = () => {
   const toggleAiState = () => {
     const newState = !aiEnabled;
     setAiEnabled(newState);
-    localStorage.setItem('sketchshot_ai_enabled', newState.toString());
+    localStorage.setItem('sketchbeans_ai_enabled', newState.toString());
   };
 
   // --- STATE MUTATION HELPERS ---
@@ -442,10 +442,10 @@ const App = () => {
 
   // --- EXPORT & DOWNLOAD LOGIC ---
   const exportSnapshot = () => {
-    const data = { version: "4.2", timestamp: new Date().toISOString(), sketches, shots, publicSketches, publicShots };
+    const data = { version: "4.3", timestamp: new Date().toISOString(), sketches, shots, publicSketches, publicShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Backup_${new Date().getTime()}.json`;
+    const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_Backup_${new Date().getTime()}.json`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -486,7 +486,7 @@ const App = () => {
     });
     const blob = new Blob([planText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = `SketchShot_ShootPlan.txt`;
+    const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_ShootPlan.txt`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -494,7 +494,7 @@ const App = () => {
     if (!activeSketch?.script) return;
     const blob = new Blob([activeSketch.script], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = `SketchShot_Script.txt`;
+    const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_Script.txt`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -507,7 +507,7 @@ const App = () => {
     } else {
       const link = document.createElement('a'); 
       link.href = imageUrl; 
-      link.download = `SketchShot_Storyboard_Shot_${shotNumber}.png`; 
+      link.download = `SketchBeans_Storyboard_Shot_${shotNumber}.png`; 
       link.click();
     }
   };
@@ -966,7 +966,7 @@ const App = () => {
       <aside className={`absolute md:relative z-40 h-full ${isSidebarOpen ? 'w-72 md:w-72 translate-x-0' : 'w-72 -translate-x-full md:w-0 md:translate-x-0'} transition-all duration-300 overflow-hidden bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0`}>
         <div className="p-6 flex justify-between items-center">
           <h1 className="text-xl font-bold tracking-tighter flex items-center gap-2">
-            <Camera className="text-orange-500" size={20} /> SKETCHSHOT
+            <Camera className="text-orange-500" size={20} /> SKETCHBEANS
           </h1>
           <button onClick={() => setSidebarOpen(false)} className="md:hidden text-zinc-500 hover:text-white"><X size={20} /></button>
         </div>
@@ -1030,7 +1030,7 @@ const App = () => {
                 value={userApiKey}
                 onChange={(e) => {
                   setUserApiKey(e.target.value);
-                  localStorage.setItem('sketchshot_gemini_key', e.target.value);
+                  localStorage.setItem('sketchbeans_gemini_key', e.target.value);
                 }}
                 placeholder="Enter Gemini Key..." 
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:outline-none focus:border-purple-500"
@@ -1437,7 +1437,13 @@ const App = () => {
                               </div>
                             )}
                           </div>
-                          <div className="flex flex-col gap-2 w-full">
+                          
+                          {/* COLLABORATION BADGE */}
+                          {shot.lastEditedBy && isWritersRoom && (
+                            <div className="mt-2 text-[9px] text-blue-400 italic">Last edit by: {shot.lastEditedBy}</div>
+                          )}
+
+                          <div className="flex flex-col gap-2 w-full mt-4">
                             <div className="flex gap-2 w-full">
                               <select value={shot.type || 'Medium'} onChange={(e) => updateShot(shot.id, 'type', e.target.value)} className="flex-1 w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 md:p-2.5 text-xs font-bold focus:ring-1 ring-orange-500 appearance-none">{SHOT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}</select>
                               <button onClick={() => updateShot(shot.id, 'fx', !shot.fx)} className={`px-4 py-3 md:py-2 rounded-xl text-[10px] font-black border ${shot.fx ? 'bg-orange-600 text-white border-orange-400' : 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}>FX</button>
