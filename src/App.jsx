@@ -48,6 +48,14 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchbeans-app';
 
+// --- PRODUCTION DIAGNOSTICS ---
+console.log("🎬 SketchBeans Rig Booting...");
+console.log("Firebase Config Loaded:", {
+  hasApiKey: !!firebaseConfig?.apiKey,
+  hasAuthDomain: !!firebaseConfig?.authDomain,
+  projectId: firebaseConfig?.projectId || "MISSING"
+});
+
 const SHOT_TYPES = ['Wide', 'Medium', 'Close Up', 'POV', 'Over the Shoulder', 'Insert', 'Drone', 'Tracking'];
 const CAMERA_MOVES = ['Locked Off', 'Handheld / Shaky', 'Slow Creep In', 'Slow Creep Out', 'Crash Zoom', 'Whip Pan', 'Dolly Tracking', 'Dutch Angle', 'Crane Up', 'Crane Down'];
 const IMAGE_STYLES = ['Pencil Sketch', 'Photographic', 'Cinematic', 'Comic Book', 'Watercolor', '3D Render', 'Vintage Film'];
@@ -71,7 +79,7 @@ const getSkinText = (val) => {
 const App = () => {
   const [user, setUser] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
-  const [isGuest, setIsGuest] = useState(false);
+  const [isGuest, setIsGuest] = useState(localStorage.getItem('sketchbeans_is_guest') === 'true');
   const isRealUser = user && !user.isAnonymous;
 
   // --- LOCAL STATE (PRIVATE) ---
@@ -110,6 +118,7 @@ const App = () => {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const isInitialLoad = useRef({ sketches: true, shots: true, pubSketches: true, pubShots: true });
+  const autosaveTimeout = useRef(null);
   const [boardCols, setBoardCols] = useState(2);
   const apiKey = globalGeminiKey; 
 
@@ -148,7 +157,10 @@ const App = () => {
       }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => { setUser(currentUser); setAuthResolved(true); });
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => { 
+      setUser(currentUser); 
+      setAuthResolved(true); 
+    });
     return () => unsubscribe();
   }, []);
 
@@ -194,7 +206,6 @@ const App = () => {
 
   // --- HARDENED LOGIN LOGIC ---
   const loginWithProvider = async () => {
-    // 1. Trap missing environment variables before we even try to call Firebase
     if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('your_key_here')) {
       alert("🚨 FATAL RIG ERROR: Your Firebase API Key is missing! \n\nVite failed to inject the VITE_FIREBASE_API_KEY environment variable during the build. Go to Coolify, double check the spelling of your variables, and click 'Deploy' to force a fresh build.");
       return;
@@ -204,9 +215,10 @@ const App = () => {
     
     try { 
       await signInWithPopup(auth, provider); 
+      setIsGuest(false);
+      localStorage.setItem('sketchbeans_is_guest', 'false');
     } catch (err) { 
       console.error("Login failed:", err);
-      // 2. Trap specific pop-up blocker issues
       if (err.code === 'auth/popup-blocked') {
         alert("🛑 POP-UP BLOCKED! Your browser or adblocker just killed the login window. Please allow pop-ups for sketchbeans.fizzywater.ca and try again.");
       } else if (err.code === 'auth/unauthorized-domain') {
@@ -215,6 +227,11 @@ const App = () => {
         alert(`Login Error (${err.code}): ${err.message}`);
       }
     }
+  };
+
+  const handleGuestEntry = () => {
+    setIsGuest(true);
+    localStorage.setItem('sketchbeans_is_guest', 'true');
   };
 
   const toggleAiState = () => {
@@ -326,23 +343,44 @@ const App = () => {
   };
 
   // --- SYNC & COLLAB LOGIC ---
-  const pushToCloud = async () => {
+  const pushToCloud = async (silent = false) => {
     if (!user || !isRealUser) return;
-    setIsSyncing(true);
+    if (!silent) setIsSyncing(true);
+    
     try {
       if (isWritersRoom) {
         const s = publicSketches.find(s => s.id === activeSketchId);
         if (s) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_sketches', s.id), { ...s, lastEditedBy: user.email || user.displayName }, { merge: true });
-        for (const shot of publicShots.filter(sh => sh.sketchId === activeSketchId)) {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_shots', shot.id), { ...shot, lastEditedBy: user.email || user.displayName }, { merge: true });
-        }
+        
+        const shotPromises = publicShots
+          .filter(sh => sh.sketchId === activeSketchId)
+          .map(shot => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_shots', shot.id), { ...shot, lastEditedBy: user.email || user.displayName }, { merge: true }));
+        await Promise.all(shotPromises);
       } else {
-        for (const s of sketches) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', s.id), s, { merge: true });
-        for (const s of shots) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', s.id), s, { merge: true });
+        const sketchPromises = sketches.map(s => setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', s.id), s, { merge: true }));
+        const shotPromises = shots.map(s => setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', s.id), s, { merge: true }));
+        await Promise.all([...sketchPromises, ...shotPromises]);
       }
-    } catch (err) { alert(`Sync Failed: ${err.message}`); }
-    setTimeout(() => setIsSyncing(false), 1000);
+    } catch (err) { 
+      if (!silent) alert(`Sync Failed: ${err.message}`);
+      console.error("Sync error:", err);
+    } finally {
+      if (!silent) setIsSyncing(false);
+    }
   };
+
+  // --- AUTOSAVE ENGINE ---
+  useEffect(() => {
+    if (!isRealUser || !authResolved || isInitialLoad.current.sketches) return;
+    
+    if (autosaveTimeout.current) clearTimeout(autosaveTimeout.current);
+    autosaveTimeout.current = setTimeout(() => {
+      pushToCloud(true); // Silent autosave in background
+    }, 5000);
+    
+    return () => clearTimeout(autosaveTimeout.current);
+  }, [sketches, shots, publicSketches, publicShots, activeSketchId, isRealUser, authResolved]);
+
 
   const openWritersRoom = async () => {
     if (isWritersRoom || !activeSketch) return;
@@ -462,14 +500,29 @@ const App = () => {
 
   // --- EXPORT & DOWNLOAD LOGIC ---
   const exportSnapshot = () => {
-    const data = { version: "4.3", timestamp: new Date().toISOString(), sketches, shots, publicSketches, publicShots };
+    const data = { version: "4.4", timestamp: new Date().toISOString(), sketches, shots, publicSketches, publicShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_Backup_${new Date().getTime()}.json`;
+    const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  };
+
+  const exportSingleSketch = (sketchId) => {
+    const targetSketch = sketches.find(s => s.id === sketchId) || publicSketches.find(s => s.id === sketchId);
+    const targetShots = shots.filter(s => s.sketchId === sketchId).concat(publicShots.filter(s => s.sketchId === sketchId));
+    
+    if (!targetSketch) return;
+
+    const data = { version: "4.4", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = url; 
+    link.download = `SketchBeans_${targetSketch.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'sketch'}.json`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   const handleImportClick = () => { if(fileInputRef.current) fileInputRef.current.click(); };
+  
   const importSnapshot = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -478,14 +531,26 @@ const App = () => {
       try {
         const content = JSON.parse(e.target?.result);
         if (content.sketches && content.shots) {
-          setSketches(content.sketches); setShots(content.shots);
-          if (content.publicSketches) setPublicSketches(content.publicSketches);
-          if (content.publicShots) setPublicShots(content.publicShots);
-          if (content.sketches.length > 0) setActiveSketchId(content.sketches[0].id);
+          const importId = Date.now().toString();
+          
+          // Generate new isolated IDs so imported sketches append safely without overwriting
+          const newSketches = content.sketches.map(s => ({...s, id: `imp_${importId}_${s.id}`}));
+          const newShots = content.shots.map(sh => {
+             const matchingSketch = newSketches.find(ns => ns.id.endsWith(`_${sh.sketchId}`));
+             return { ...sh, id: `imp_${importId}_${sh.id}`, sketchId: matchingSketch ? matchingSketch.id : sh.sketchId };
+          });
+
+          setSketches(prev => [...prev, ...newSketches]);
+          setShots(prev => [...prev, ...newShots]);
+          
+          if (newSketches.length > 0) setActiveSketchId(newSketches[0].id);
         }
-      } catch (err) {}
+      } catch (err) { 
+        alert("Failed to import. The file might be corrupted."); 
+      }
     };
     reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input to allow re-import of same file
   };
 
   const downloadShootPlan = () => {
@@ -723,7 +788,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, genShots: true }));
     try {
       const typeList = SHOT_TYPES.join(', ');
-      const systemPrompt = `Expert comedy director. Generate JSON array of exactly 8 shots. Use these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "shotCharacters" (array of strings). CRITICAL: Keep all text responses extremely brief, punchy, and direct. No flowery language. 1-2 short sentences max.`;
+      const systemPrompt = `Expert comedy director and screenwriter. Generate JSON array of exactly 8 shots. Use these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "shotCharacters" (array of strings). Focus heavily on standard screenplay language. Describe exactly what we SEE and HEAR. Include specific physical blocking, character emotion, and atmospheric details. Make it vivid and cinematic, using 2-4 sentences max per field.`;
       const prompt = `PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nSCENE: ${formattedSceneHeading}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nESCALATION: ${activeSketch?.escalation}\nENDING: ${activeSketch?.ending}`;
       const newShotsData = await callGemini(prompt, systemPrompt, true);
       if (newShotsData) {
@@ -739,7 +804,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, singleAIShot: true }));
     try {
       const typeList = SHOT_TYPES.join(', ');
-      const systemPrompt = `Expert comedy director. Generate exactly ONE new shot to continue the sequence. Return a SINGLE JSON OBJECT with these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "shotCharacters" (array of strings). CRITICAL: Keep all text extremely brief, punchy, and direct. 1-2 short sentences max. Zero fluff.`;
+      const systemPrompt = `Expert comedy director and screenwriter. Generate exactly ONE new shot to continue the sequence. Return a SINGLE JSON OBJECT with these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "shotCharacters" (array of strings). Focus on standard screenplay format. Describe what we SEE and HEAR clearly. Include character emotion and specific physical blocking. Make it vivid and cinematic, using 2-4 sentences max per field.`;
       const recentShots = activeShots.slice(-3).map(s => `Shot ${s.number}: [${s.type}] ${s.subject} - ${s.action}`).join('\n');
       const prompt = `PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nSCENE: ${formattedSceneHeading}\nCHARACTERS: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nRECENT SHOTS:\n${recentShots}\n\nCreate the NEXT logical shot to build the comedy.`;
       const newShotData = await callGemini(prompt, systemPrompt, true);
@@ -786,7 +851,7 @@ const App = () => {
       const charContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.desc || n).join(', ') : richCharactersContext;
       const existing = shot[field] ? `CURRENT TEXT (DO NOT ERASE, ESCALATE THIS): "${shot[field]}"` : `CURRENT TEXT: [Empty]`;
       const prompt = `Scene: ${formattedSceneHeading}\nPremise: ${activeSketch?.premise}\n${contextPrompt}\nCharacters in shot: ${charContext}\nCamera Move: ${shot.cameraMove}\n${existing}`;
-      const newText = await callGemini(prompt, `${rolePrompt} Apply the 'Yes, And...' rule. If text exists, keep facts and punch it up. CRITICAL: Be extremely concise, direct, and blunt. No flowery prose. 1-2 short sentences max.`, false);
+      const newText = await callGemini(prompt, `${rolePrompt} Apply the 'Yes, And...' rule. If text exists, keep facts and expand on them. Write in a descriptive, vivid screenplay style. Aim for 2-4 solid sentences detailing the atmosphere, emotion, and specifics of what we see or hear.`, false);
       if (newText) {
         setHistory(prev => ({ ...prev, [`shot-${shotId}-${field}`]: shot[field] || '' }));
         updateShot(shotId, field, newText.trim());
@@ -805,7 +870,7 @@ const App = () => {
   const generateNarrativeBeat = async (beatType) => {
     setLoadingStates(prev => ({ ...prev, [beatType]: true }));
     try {
-      const systemPrompt = `Brilliant comedy writer (${activeSketch?.tone || 'comedic'} humor). Provide a punchy, creative ${beatType} for the sketch. CRITICAL: Be extremely brief and direct. 1-2 short sentences maximum. Zero fluff.`;
+      const systemPrompt = `Brilliant comedy writer (${activeSketch?.tone || 'comedic'} humor). Provide a punchy, creative ${beatType} for the sketch. Write in descriptive screenplay outline format. Focus on what we SEE and HEAR. 2-4 sentences detailing the emotion and atmosphere.`;
       const prompt = `Title: ${activeSketch?.title}\nScene Heading: ${formattedSceneHeading}\nCharacter Profiles: ${richCharactersContext}\nCurrent Premise: ${activeSketch?.premise}\nCurrent Hook: ${activeSketch?.hook}\nCurrent Escalation: ${activeSketch?.escalation}\nCurrent Ending: ${activeSketch?.ending}\nTask: Write/Improve the ${beatType.toUpperCase()}.`;
       const newBeat = await callGemini(prompt, systemPrompt, false);
       if (newBeat) {
@@ -828,7 +893,7 @@ const App = () => {
     const char = activeProfiles.find(c => c.id === charId);
     try {
       const existing = char.desc ? `CURRENT DETAILS (YES, AND... THESE): "${char.desc}"\n` : '';
-      const prompt = `Scene: ${formattedSceneHeading}\nPremise: ${activeSketch?.premise}\nSketch Hook: ${activeSketch?.hook}\nCharacter Name: ${char.name}\nCharacter Tropes: ${char.archetype}, ${char.age} years old, ${getGenderText(char.gender)}, ${getSkinText(char.melanin)}\n${existing}Task: Write 1 absurd, highly specific character description or fatal flaw. CRITICAL: Extremely brief, direct, and punchy. No flowery prose. Maximum 15 words.`;
+      const prompt = `Scene: ${formattedSceneHeading}\nPremise: ${activeSketch?.premise}\nSketch Hook: ${activeSketch?.hook}\nCharacter Name: ${char.name}\nCharacter Tropes: ${char.archetype}, ${char.age} years old, ${getGenderText(char.gender)}, ${getSkinText(char.melanin)}\n${existing}Task: Write a character introduction for a screenplay. Describe what we SEE (weird physical traits, wardrobe, posture) and their fatal flaw in 2-3 vivid sentences.`;
       const newDesc = await callGemini(prompt, `Expert comedy writer (${activeSketch?.tone || 'comedic'} humor).`, false);
       if (newDesc) {
         setHistory(prev => ({ ...prev, [`char-${charId}-desc`]: char.desc || '' }));
@@ -981,7 +1046,7 @@ const App = () => {
             
             <div className="space-y-3 relative z-10">
               <button onClick={() => loginWithProvider()} className="w-full flex justify-center items-center gap-3 px-4 py-4 text-xs font-black bg-zinc-100 hover:bg-white text-zinc-900 rounded-2xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5">CONTINUE WITH GOOGLE</button>
-              <button onClick={() => setIsGuest(true)} className="w-full flex justify-center items-center gap-3 px-4 py-3 text-[10px] font-black bg-transparent hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 rounded-2xl transition-all mt-4 uppercase tracking-widest border border-dashed border-transparent hover:border-zinc-700">Explore as Guest</button>
+              <button onClick={handleGuestEntry} className="w-full flex justify-center items-center gap-3 px-4 py-3 text-[10px] font-black bg-transparent hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 rounded-2xl transition-all mt-4 uppercase tracking-widest border border-dashed border-transparent hover:border-zinc-700">Explore as Guest</button>
             </div>
           </div>
         </div>
@@ -1027,9 +1092,14 @@ const App = () => {
               <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0">
                 <FileText size={16} className="shrink-0" /> <span className="truncate font-medium text-sm">{sketch.title || 'Untitled'}</span>
               </button>
-              <button onClick={(e) => { e.stopPropagation(); setSketchToDelete(sketch); }} className="opacity-0 group-hover:opacity-100 hover:text-red-400 p-1.5 transition-opacity" title="Delete Sketch">
-                <Trash2 size={14} />
-              </button>
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={(e) => { e.stopPropagation(); exportSingleSketch(sketch.id); }} className="hover:text-blue-400 p-1.5" title="Export Single Sketch">
+                  <Download size={14} />
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); setSketchToDelete(sketch); }} className="hover:text-red-400 p-1.5" title="Delete Sketch">
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
           ))}
           <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Sketch', settingType: 'INT.', location: 'LOCATION', timeOfDay: 'DAY', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', premise: '', characters: '', characterProfiles: [], props: '', hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW SKETCH</button>
@@ -1041,11 +1111,16 @@ const App = () => {
               <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0">
                 <GitBranch size={16} className="shrink-0" /> <span className="truncate font-medium text-sm">{sketch.title || 'Untitled'}</span>
               </button>
-              {sketch.originalAuthorId === user?.uid && (
-                <button onClick={(e) => { e.stopPropagation(); setSketchToDelete(sketch); }} className="opacity-0 group-hover:opacity-100 hover:text-red-400 p-1.5 transition-opacity" title="Delete Shared Sketch">
-                  <Trash2 size={14} />
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={(e) => { e.stopPropagation(); exportSingleSketch(sketch.id); }} className="hover:text-blue-400 p-1.5" title="Export Single Sketch">
+                  <Download size={14} />
                 </button>
-              )}
+                {sketch.originalAuthorId === user?.uid && (
+                  <button onClick={(e) => { e.stopPropagation(); setSketchToDelete(sketch); }} className="hover:text-red-400 p-1.5" title="Delete Shared Sketch">
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
           {publicSketches.length === 0 && <div className="px-3 text-xs text-zinc-600 italic">No shared sketches.</div>}
@@ -1088,28 +1163,29 @@ const App = () => {
           )}
 
           <div className="p-4 space-y-3">
-            <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-              <Cloud className="text-green-500" size={14} /> Cloud Rig
+            <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between">
+              <span className="flex items-center gap-2"><Cloud className="text-green-500" size={14} /> Cloud Rig</span>
+              {isSyncing && <span className="text-blue-500 flex items-center gap-1 animate-pulse"><Loader2 size={10} className="animate-spin"/> SAVING...</span>}
             </div>
             
             <div className="space-y-2">
               <div className="text-xs text-zinc-400 truncate flex items-center justify-between">
                 <span className="truncate mr-2">{isRealUser ? user.email : 'Guest Viewer'}</span>
                 {isRealUser ? (
-                  <button onClick={() => signOut(auth)} className="text-red-400 hover:text-red-300 shrink-0" title="Sign Out"><LogOut size={14} /></button>
+                  <button onClick={() => { signOut(auth); setIsGuest(false); localStorage.removeItem('sketchbeans_is_guest'); }} className="text-red-400 hover:text-red-300 shrink-0" title="Sign Out"><LogOut size={14} /></button>
                 ) : (
-                  <button onClick={() => { setIsGuest(false); setAuthResolved(true); }} className="text-orange-400 hover:text-orange-300 font-bold shrink-0" title="Log In">LOG IN</button>
+                  <button onClick={() => { setIsGuest(false); setAuthResolved(true); localStorage.removeItem('sketchbeans_is_guest'); }} className="text-orange-400 hover:text-orange-300 font-bold shrink-0" title="Log In">LOG IN</button>
                 )}
               </div>
-              <button onClick={pushToCloud} disabled={isSyncing || !isRealUser} className="w-full flex justify-center items-center gap-2 px-3 py-2 text-[10px] font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none">
+              <button onClick={() => pushToCloud(false)} disabled={isSyncing || !isRealUser} className="w-full flex justify-center items-center gap-2 px-3 py-2 text-[10px] font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none">
                 {isSyncing ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Save size={12} />)}
-                SYNC CHANGES
+                FORCE MANUAL SYNC
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/50">
-              <button onClick={exportSnapshot} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 rounded-lg transition-all"><Download size={10} /> BACKUP</button>
-              <button onClick={handleImportClick} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-purple-400 border border-zinc-800 rounded-lg transition-all"><Upload size={10} /> IMPORT</button>
+              <button onClick={exportSnapshot} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 rounded-lg transition-all"><Download size={10} /> BACKUP ALL</button>
+              <button onClick={handleImportClick} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-purple-400 border border-zinc-800 rounded-lg transition-all" title="Appends file to your current rig"><Upload size={10} /> IMPORT</button>
             </div>
             <input type="file" ref={fileInputRef} onChange={importSnapshot} accept=".json" className="hidden" />
           </div>
@@ -1525,7 +1601,7 @@ const App = () => {
                                     <button onClick={() => revertShotField(shot.id, 'action')} className="p-1 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
                                   )}
                                   {aiEnabled && (
-                                    <button onClick={() => generateTextAssist(shot.id, 'action', 'Director blocking physical comedy.', `Shot Subject: ${shot.subject}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-orange-500/20 rounded disabled:opacity-50 shrink-0 text-orange-500">{loadingStates[`action-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Clapperboard size={12} />)}</button>
+                                    <button onClick={() => generateTextAssist(shot.id, 'action', 'Director blocking physical comedy. Write in screenplay format.', `Describe exactly what we SEE. Focus on specific physical action, props, and facial expressions. Make it vivid and cinematic.`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-orange-500/20 rounded disabled:opacity-50 shrink-0 text-orange-500">{loadingStates[`action-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Clapperboard size={12} />)}</button>
                                   )}
                                 </div>
                                 Action / Blocking
@@ -1541,7 +1617,7 @@ const App = () => {
                                       <button onClick={() => revertShotField(shot.id, 'dialogue')} className="p-1 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
                                     )}
                                     {aiEnabled && (
-                                      <button onClick={() => generateTextAssist(shot.id, 'dialogue', 'Writer drafting dialogue.', `Subject: ${shot.subject}, Action: ${shot.action}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-purple-500/20 rounded disabled:opacity-50 shrink-0 text-purple-500">{loadingStates[`dialogue-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Quote size={12} />)}</button>
+                                      <button onClick={() => generateTextAssist(shot.id, 'dialogue', 'Writer drafting dialogue.', `Write the dialogue and vocal delivery. Describe exactly what we HEAR. Include tone of voice, stutters, or overlapping speech if needed.`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-purple-500/20 rounded disabled:opacity-50 shrink-0 text-purple-500">{loadingStates[`dialogue-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Quote size={12} />)}</button>
                                     )}
                                   </div>
                                   Dialogue / Improv
@@ -1555,7 +1631,7 @@ const App = () => {
                                       <button onClick={() => revertShotField(shot.id, 'notes')} className="p-1 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
                                     )}
                                     {aiEnabled && (
-                                      <button onClick={() => generateTextAssist(shot.id, 'notes', 'DP advising on camera/light.', `Type: ${shot.type}, Subject: ${shot.subject}`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-blue-500/20 rounded disabled:opacity-50 shrink-0 text-blue-500">{loadingStates[`notes-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Wand2 size={12} />)}</button>
+                                      <button onClick={() => generateTextAssist(shot.id, 'notes', 'DP advising on camera/light.', `Focus on lighting, lens choice, camera movement, and the emotional feeling the shot should evoke.`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-blue-500/20 rounded disabled:opacity-50 shrink-0 text-blue-500">{loadingStates[`notes-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Wand2 size={12} />)}</button>
                                     )}
                                   </div>
                                   Director Notes
