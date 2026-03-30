@@ -194,7 +194,12 @@ const App = () => {
 
   const loginWithProvider = async (providerName) => {
     const provider = providerName === 'google' ? new GoogleAuthProvider() : new GithubAuthProvider();
-    try { await signInWithPopup(auth, provider); } catch (err) { console.error("Login failed:", err); }
+    try { 
+      await signInWithPopup(auth, provider); 
+    } catch (err) { 
+      console.error("Login failed:", err);
+      alert(`Login Error: ${err.message}\n\nMake sure ${providerName} is enabled in your Firebase Auth settings, and double-check your VITE_FIREBASE_AUTH_DOMAIN in Coolify.`);
+    }
   };
 
   const toggleAiState = () => {
