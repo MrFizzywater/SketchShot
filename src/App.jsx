@@ -48,6 +48,14 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchbeans-app';
 
+// --- PRODUCTION DIAGNOSTICS ---
+console.log("🎬 SketchBeans Rig Booting...");
+console.log("Firebase Config Loaded:", {
+  hasApiKey: !!firebaseConfig?.apiKey,
+  hasAuthDomain: !!firebaseConfig?.authDomain,
+  projectId: firebaseConfig?.projectId || "MISSING"
+});
+
 const SHOT_TYPES = ['Wide', 'Medium', 'Close Up', 'POV', 'Over the Shoulder', 'Insert', 'Drone', 'Tracking'];
 const CAMERA_MOVES = ['Locked Off', 'Handheld / Shaky', 'Slow Creep In', 'Slow Creep Out', 'Crash Zoom', 'Whip Pan', 'Dolly Tracking', 'Dutch Angle', 'Crane Up', 'Crane Down'];
 const IMAGE_STYLES = ['Pencil Sketch', 'Photographic', 'Cinematic', 'Comic Book', 'Watercolor', '3D Render', 'Vintage Film'];
