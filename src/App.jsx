@@ -151,19 +151,27 @@ const App = () => {
   }, [activeSketchId]);
 
   useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token).catch(console.error);
+    let isMounted = true;
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => { 
+      if (currentUser) {
+        if (isMounted) {
+          setUser(currentUser); 
+          setAuthResolved(true); 
+        }
       } else {
-        await signInAnonymously(auth).catch(() => {});
+        // Only generate a guest pass if the user is truly logged out
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token).catch(console.error);
+        } else {
+          await signInAnonymously(auth).catch(() => {});
+        }
       }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => { 
-      setUser(currentUser); 
-      setAuthResolved(true); 
     });
-    return () => unsubscribe();
+    
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
