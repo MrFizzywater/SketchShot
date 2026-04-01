@@ -67,12 +67,13 @@ const getSkinText = (val) => {
 };
 
 const formatTime = (secs) => {
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
+  const safeSecs = parseInt(secs) || 0;
+  const m = Math.floor(safeSecs / 60);
+  const s = safeSecs % 60;
   return m > 0 ? (
-    <>{m}<span className="opacity-50 lowercase ml-[1px] mr-1">m</span>{s}<span className="opacity-50 lowercase ml-[1px]">s</span></>
+    <React.Fragment>{m}<span className="opacity-50 lowercase ml-[1px] mr-1">m</span>{s}<span className="opacity-50 lowercase ml-[1px]">s</span></React.Fragment>
   ) : (
-    <>{s}<span className="opacity-50 lowercase ml-[1px]">s</span></>
+    <React.Fragment>{s}<span className="opacity-50 lowercase ml-[1px]">s</span></React.Fragment>
   );
 };
 
@@ -135,7 +136,6 @@ const App = () => {
   const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
   const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
   
-  // Adjusted List rendering logic for the new toggle
   let currentDisplayList = activeShots;
   if (boardSubTab === 'shoot-plan' && shootPlan.length > 0) currentDisplayList = shootPlan;
   if (boardSubTab === 'print-list' && printListMode === 'shoot-plan' && shootPlan.length > 0) currentDisplayList = shootPlan;
@@ -250,7 +250,7 @@ const App = () => {
   };
 
   const updateSceneHeadingBulk = (oldHeading, newHeading) => {
-    if (!newHeading.trim() || oldHeading === newHeading) return;
+    if (!newHeading || !newHeading.trim() || oldHeading === newHeading) return;
     updateContextState(prev => prev.map(s => {
       if (s.sketchId === activeSketchId && s.sceneHeading === oldHeading) {
         return { ...s, sceneHeading: newHeading.toUpperCase() };
@@ -319,7 +319,6 @@ const App = () => {
       const oldName = oldProfile.name;
       const newName = value;
       
-      // Update Shots
       updateContextState(prev => prev.map(shot => {
         if (shot.sketchId !== activeSketchId) return shot;
         let changed = false;
@@ -340,7 +339,6 @@ const App = () => {
         return changed ? newShot : shot;
       }), false);
 
-      // Update Config & Script Text Fields
       const regexGlobal = new RegExp(`\\b${oldName}\\b`, 'g');
       let sketchChanged = false;
       let updatedActiveSketch = { ...activeSketch };
@@ -403,7 +401,7 @@ const App = () => {
           count++;
           if (count >= 400) { await batch.commit(); batch = writeBatch(db); count = 0; }
         }
-        await batch.commit();
+        if (count > 0) await batch.commit();
       } catch (err) { console.error("Error clearing shots", err); }
     }
   };
@@ -541,7 +539,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "7.1", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "7.2", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -552,7 +550,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "7.1", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "7.2", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -614,11 +612,12 @@ const App = () => {
     
     let currentHeading = '';
     shootPlan.forEach((shot, index) => {
-      if (shot.sceneHeading !== currentHeading) {
-        planText += `\n[ SCENE: ${shot.sceneHeading.toUpperCase()} ]\n-----------------------------------------\n`;
-        currentHeading = shot.sceneHeading;
+      const headingText = shot.sceneHeading || 'LOCATION';
+      if (headingText !== currentHeading) {
+        planText += `\n[ SCENE: ${headingText.toUpperCase()} ]\n-----------------------------------------\n`;
+        currentHeading = headingText;
       }
-      planText += `${index + 1}. [${shot.type.toUpperCase()}] ${shot.subject.toUpperCase()}\n`;
+      planText += `${index + 1}. [${(shot.type || 'Shot').toUpperCase()}] ${(shot.subject || '').toUpperCase()}\n`;
       if (shot.cameraMove) planText += `   Camera Move: ${shot.cameraMove}\n`;
       if (shot.duration) planText += `   Est. Time: ${shot.duration}s\n`;
       if (shot.shotCharacters?.length > 0) planText += `   Characters: ${shot.shotCharacters.join(', ')}\n`;
@@ -719,8 +718,8 @@ const App = () => {
     prompt += `VISUAL STYLE: ${stylePrefix}\n\n`;
     prompt += `SCENE CONTEXT: ${activeSketch?.premise || activeSketch?.title}\n`;
     prompt += `LOCATION: ${location}\n\n`;
-    prompt += `IMAGE TO GENERATE: A ${shot.type} shot of ${shot.subject}. `;
-    if (shot.cameraMove !== 'Locked Off') prompt += `The camera is moving: ${shot.cameraMove}. `;
+    prompt += `IMAGE TO GENERATE: A ${shot.type || 'Medium'} shot of ${shot.subject || 'subject'}. `;
+    if (shot.cameraMove && shot.cameraMove !== 'Locked Off') prompt += `The camera is moving: ${shot.cameraMove}. `;
     if (shot.action) prompt += `Action happening in frame: ${shot.action} `;
     
     if (charContext) prompt += `\n\nSUBJECT DETAILS (Strict Likeness): The characters in this frame must match these descriptions exactly: ${charContext}.`;
@@ -957,6 +956,12 @@ const App = () => {
   };
 
   const generateAISHots = async (count, type) => {
+    // Failsafe: if the user clicks a stale button mapping that passes the Event object, intercept it
+    if (typeof count !== 'number') {
+      count = 8;
+      type = 'sequence';
+    }
+
     setLoadingStates(prev => ({ ...prev, genShots: true }));
     try {
       const typeList = SHOT_TYPES.join(', ');
@@ -971,7 +976,7 @@ const App = () => {
       
       const newShotsData = await callGemini(prompt, systemPrompt, true);
       
-      if (newShotsData) {
+      if (newShotsData && Array.isArray(newShotsData)) {
         updateContextState(prev => {
           const currentSketchShots = prev.filter(s => s.sketchId === activeSketchId);
           const maxNum = currentSketchShots.length > 0 ? Math.max(...currentSketchShots.map(s => s.number)) : 0;
@@ -995,15 +1000,26 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, genShots: false })); }
   };
 
-  const optimizeShootOrder = async () => {
+  const optimizeShootOrder = async (isPrintList = false) => {
     setLoadingStates(prev => ({ ...prev, optimizing: true }));
     try {
       const systemPrompt = `Expert 1st AD. Reorder shots into most efficient SHOOT ORDER. Group by Scene Headings, Location Caveats, Shot Types, and active Characters. Return JSON array of objects with 'id' and 'reason'.`;
       const prompt = `Scene: ${activeSketch?.title}\nShots: ${activeShots.map(s => `ID: ${s.id}, Scene: ${s.sceneHeading}, Type: ${s.type}, Subject: ${s.subject}, Location Caveat: ${s.locationCaveat || 'Base'}, Chars: ${(s.shotCharacters||[]).join(',')}`).join('\n')}`;
       const optimizedIds = await callGemini(prompt, systemPrompt, true);
-      if (optimizedIds) {
-        setShootPlan(optimizedIds.map((item, idx) => ({ ...activeShots.find(s => s.id === item.id), shootOrderNumber: idx + 1, optimizationReason: item.reason })));
-        setBoardSubTab('shoot-plan');
+      
+      if (optimizedIds && Array.isArray(optimizedIds)) {
+        setShootPlan(
+          optimizedIds.map((item, idx) => {
+            const foundShot = activeShots.find(s => s.id === item.id);
+            return foundShot ? { ...foundShot, shootOrderNumber: idx + 1, optimizationReason: item.reason } : null;
+          }).filter(s => s !== null) // Safely purge any AI hallucinations
+        );
+        
+        if (isPrintList === true) {
+          setPrintListMode('shoot-plan');
+        } else {
+          setBoardSubTab('shoot-plan');
+        }
       }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, optimizing: false })); }
   };
@@ -1674,7 +1690,7 @@ const App = () => {
                       </button>
                     )}
                     {boardSubTab === 'grid' && aiEnabled && (
-                      <div className="flex bg-purple-600/20 border border-purple-500/30 rounded-full overflow-hidden shadow-lg shadow-purple-900/20">
+                      <div className="flex bg-purple-600/20 border border-purple-500/30 rounded-full overflow-hidden shadow-lg shadow-purple-900/20 shrink-0">
                         <div className="flex items-center px-3 border-r border-purple-500/30 text-purple-400">
                           {loadingStates.genShots ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)}
                         </div>
@@ -1687,7 +1703,7 @@ const App = () => {
                     )}
                     {boardSubTab === 'shoot-plan' && (
                       <>
-                        <button onClick={optimizeShootOrder} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center items-center gap-2 px-4 py-2 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border border-yellow-500/30 rounded-full text-[10px] font-black transition-all flex">
+                        <button onClick={() => optimizeShootOrder(false)} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center items-center gap-2 px-4 py-2 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border border-yellow-500/30 rounded-full text-[10px] font-black transition-all flex">
                           {loadingStates.optimizing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCcw size={12} />} REASSESS
                         </button>
                         <button onClick={downloadShootPlan} className="flex-1 sm:flex-none justify-center items-center gap-2 px-4 py-2 bg-zinc-800 text-yellow-500 hover:bg-zinc-700 border border-zinc-700 rounded-full text-[10px] font-black transition-all flex"><Download size={12} /> SAVE TXT</button>
@@ -1709,9 +1725,13 @@ const App = () => {
                     {activeShots.map((shot, index) => {
                       const currentPrompt = getShotPrompt(shot);
                       const isPersonalKeyActive = userApiKey.trim().length > 0;
-                      // Identify if this shot starts a new scene visually
-                      const isNewScene = index === 0 || shot.sceneHeading !== activeShots[index - 1].sceneHeading;
-                      const isEditingThisHeading = bulkHeadingEdit.old === shot.sceneHeading;
+                      
+                      // Safely evaluate heading to prevent undefined errors
+                      const currentHeading = shot.sceneHeading || '';
+                      const previousShot = index > 0 ? activeShots[index - 1] : null;
+                      const previousHeading = previousShot?.sceneHeading || '';
+                      const isNewScene = index === 0 || currentHeading !== previousHeading;
+                      const isEditingThisHeading = bulkHeadingEdit.old === currentHeading;
                       
                       return (
                       <React.Fragment key={shot.id}>
@@ -1721,8 +1741,8 @@ const App = () => {
                              <div className="text-sm font-black uppercase tracking-widest text-orange-500 bg-orange-500/10 px-4 py-2 rounded-full border border-orange-500/20 flex items-center gap-2 group/heading">
                                 <Clapperboard size={16}/> 
                                 <input 
-                                  value={isEditingThisHeading ? bulkHeadingEdit.value : shot.sceneHeading}
-                                  onChange={(e) => setBulkHeadingEdit({ old: shot.sceneHeading, value: e.target.value.toUpperCase() })}
+                                  value={isEditingThisHeading ? (bulkHeadingEdit.value || '') : currentHeading}
+                                  onChange={(e) => setBulkHeadingEdit({ old: currentHeading, value: e.target.value.toUpperCase() })}
                                   onBlur={() => {
                                     if (bulkHeadingEdit.old) {
                                       updateSceneHeadingBulk(bulkHeadingEdit.old, bulkHeadingEdit.value);
@@ -1789,6 +1809,8 @@ const App = () => {
                                 )}
                               </div>
                               
+                              {shot.lastEditedBy && isWritersRoom && <div className="mt-2 text-[9px] text-blue-400 italic">Last edit by: {shot.lastEditedBy}</div>}
+
                               <div className="flex flex-col gap-2 w-full mt-4">
                                 <div className="flex items-center bg-zinc-950/50 border border-zinc-800/50 rounded-xl px-3 py-3 md:py-2 w-full focus-within:border-orange-500/50 transition-colors">
                                   <Clapperboard size={12} className="text-orange-500 mr-2 shrink-0" />
@@ -1800,7 +1822,7 @@ const App = () => {
                                 </div>
                                 <div className="flex items-center bg-zinc-950/50 border border-zinc-800/50 rounded-xl px-3 py-3 md:py-2 w-full"><Map size={12} className="text-zinc-500 mr-2 shrink-0" /><input value={shot.locationCaveat || ''} onChange={(e) => updateShot(shot.id, 'locationCaveat', e.target.value)} placeholder="Specific area caveat... (e.g. Corner desk)" className="w-full bg-transparent text-[10px] font-bold text-zinc-400 focus:outline-none min-w-0" /></div>
                                 
-                                {/* CAMERA MOVE AND DURATION */}
+                                {/* MOVED CAMERA MOVE AND DURATION TO LEFT PANEL */}
                                 <div className="flex gap-2 w-full">
                                   <div className="flex-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl focus-within:border-blue-500/50 transition-colors flex items-center px-2">
                                      <Video size={12} className="text-blue-500 mr-2 shrink-0"/>
@@ -1995,7 +2017,7 @@ const App = () => {
                           <div className="flex bg-zinc-200 rounded-full p-1 shadow-inner items-center">
                             <span className="text-[10px] font-black uppercase text-zinc-500 px-3 select-none">Sort:</span>
                             <button onClick={() => setPrintListMode('sequence')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${printListMode === 'sequence' ? 'bg-black text-white shadow' : 'text-zinc-600 hover:text-black'}`}>IN SEQUENCE</button>
-                            <button onClick={() => { if(shootPlan.length > 0) setPrintListMode('shoot-plan'); else optimizeShootOrder(); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${printListMode === 'shoot-plan' ? 'bg-black text-white shadow' : 'text-zinc-600 hover:text-black'}`}>
+                            <button onClick={() => { if(shootPlan.length > 0) setPrintListMode('shoot-plan'); else optimizeShootOrder(true); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${printListMode === 'shoot-plan' ? 'bg-black text-white shadow' : 'text-zinc-600 hover:text-black'}`}>
                                {loadingStates.optimizing ? <Loader2 size={12} className="animate-spin inline" /> : '1ST AD PLAN'}
                             </button>
                           </div>
