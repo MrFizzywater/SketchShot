@@ -101,9 +101,9 @@ const App = () => {
   // --- UI & TAB STATE ---
   const [activeSketchId, setActiveSketchId] = useState(localStorage.getItem('sketchbeans_active_sketch') || '1');
   const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
-  const [viewMode, setViewMode] = useState('scene'); // scene, characters, storyboard, script
-  const [boardSubTab, setBoardSubTab] = useState('grid'); // grid, shoot-plan, print-boards, print-list
-  const [scriptSubTab, setScriptSubTab] = useState('editor'); // editor, breaker
+  const [viewMode, setViewMode] = useState('scene'); 
+  const [boardSubTab, setBoardSubTab] = useState('grid'); 
+  const [scriptSubTab, setScriptSubTab] = useState('editor'); 
   const [showAdvancedBeats, setShowAdvancedBeats] = useState(false);
   const [newPropInput, setNewPropInput] = useState('');
   
@@ -128,7 +128,7 @@ const App = () => {
   const isInitialLoad = useRef({ sketches: true, shots: true, pubSketches: true, pubShots: true });
   const [hasLoadedCloudData, setHasLoadedCloudData] = useState(false);
   const autosaveTimeout = useRef(null);
-  const isDirty = useRef(false); // Tripwire for human edits
+  const isDirty = useRef(false); 
   const [boardCols, setBoardCols] = useState(2);
   const apiKey = globalGeminiKey; 
 
@@ -143,7 +143,6 @@ const App = () => {
   
   const totalDurationSeconds = activeShots.reduce((acc, shot) => acc + (parseInt(shot.duration) || 0), 0);
   
-  // Normalize props for rendering
   const activePropsList = Array.isArray(activeSketch?.props) ? activeSketch.props : (activeSketch?.props ? String(activeSketch.props).split(',').map(s => s.trim()).filter(s => s) : []);
 
   const isOriginalAuthor = isWritersRoom && activeSketch?.originalAuthorId === user?.uid;
@@ -161,7 +160,6 @@ const App = () => {
 
   useEffect(() => {
     if (activeSketchId) localStorage.setItem('sketchbeans_active_sketch', activeSketchId);
-    // Reset script breaker when switching sketches
     setRawImportScript('');
     setScriptChunks([]);
   }, [activeSketchId]);
@@ -230,7 +228,6 @@ const App = () => {
     return () => { unsubSketches(); unsubShots(); unsubPubSketches(); unsubPubShots(); };
   }, [isRealUser, user]);
 
-  // --- HARDENED LOGIN LOGIC ---
   const loginWithProvider = async () => {
     if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('your_key_here')) {
       alert("🚨 FATAL RIG ERROR: Your Firebase API Key is missing! \n\nVite failed to inject the VITE_FIREBASE_API_KEY environment variable during the build. Go to Coolify, double check the spelling of your variables, and click 'Deploy' to force a fresh build.");
@@ -266,9 +263,8 @@ const App = () => {
     localStorage.setItem('sketchbeans_ai_enabled', newState.toString());
   };
 
-  // --- STATE MUTATION HELPERS ---
   const updateContextState = (stateUpdater, isSketch) => {
-    isDirty.current = true; // Mark as human-edited
+    isDirty.current = true;
     if (isWritersRoom) {
       if (isSketch) setPublicSketches(stateUpdater); else setPublicShots(stateUpdater);
     } else {
@@ -315,7 +311,6 @@ const App = () => {
 
   const addShot = () => {
     const nextNumber = activeShots.length > 0 ? Math.max(...activeShots.map(s => s.number)) + 1 : 1;
-    // Default new shots to the previous shot's scene heading
     const lastHeading = activeShots.length > 0 ? activeShots[activeShots.length - 1].sceneHeading : 'INT. LOCATION - DAY';
     updateContextState(prev => [...prev, { id: (isWritersRoom ? 'pub_' : '') + Date.now().toString(), sketchId: activeSketchId, number: nextNumber, type: 'Medium', cameraMove: 'Locked Off', duration: 5, subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, sceneHeading: lastHeading, shotCharacters: [] }], false);
   };
@@ -402,7 +397,6 @@ const App = () => {
     setSketchToDelete(null);
   };
 
-  // --- SYNC & COLLAB LOGIC ---
   const pushToCloud = async (silent = false) => {
     if (!user || !isRealUser) return;
     if (!silent) setIsSyncing(true);
@@ -438,7 +432,6 @@ const App = () => {
     }
   };
 
-  // --- AUTOSAVE ENGINE ---
   useEffect(() => {
     if (!isRealUser || !authResolved || !hasLoadedCloudData) return;
     
@@ -452,7 +445,6 @@ const App = () => {
     
     return () => clearTimeout(autosaveTimeout.current);
   }, [sketches, shots, publicSketches, publicShots, activeSketchId, isRealUser, authResolved, hasLoadedCloudData]);
-
 
   const openWritersRoom = async () => {
     if (isWritersRoom || !activeSketch) return;
@@ -515,7 +507,6 @@ const App = () => {
     }
   };
 
-  // --- IMAGE UPLOAD LOGIC ---
   const handleImageUpload = (shotId, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -570,9 +561,8 @@ const App = () => {
     setVisiblePromptId(null); 
   };
 
-  // --- EXPORT & DOWNLOAD LOGIC ---
   const exportSnapshot = () => {
-    const data = { version: "6.0", timestamp: new Date().toISOString(), sketches, shots, publicSketches, publicShots };
+    const data = { version: "6.1", timestamp: new Date().toISOString(), sketches, shots, publicSketches, publicShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -585,7 +575,7 @@ const App = () => {
     
     if (!targetSketch) return;
 
-    const data = { version: "6.0", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "6.1", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -739,6 +729,87 @@ const App = () => {
     } finally { setIsAIBusy(false); }
   };
 
+  const getShotPrompt = (shot) => {
+    const charContext = shot.shotCharacters?.length > 0 
+      ? shot.shotCharacters.map(n => {
+          const profile = activeProfiles.find(p => p.name === n);
+          if (!profile) return n;
+          return `${n} (A ${profile.age} year old ${profile.sex || 'person'}, ${getGenderText(profile.gender || 50)}, ${getSkinText(profile.melanin || 50)}. Visual traits: ${profile.desc || ''})`;
+        }).join(', ') 
+      : "";
+
+    const location = shot.sceneHeading || 'LOCATION';
+    const style = activeSketch?.imageStyle || 'Pencil Sketch';
+    
+    let stylePrefix = "Rough storyboard sketch, mixed media graphite and colored pencil.";
+    if (style === 'Photographic') stylePrefix = "High-resolution photograph, photorealistic, 85mm lens.";
+    else if (style === 'Cinematic') stylePrefix = "Cinematic movie still, anamorphic lens, dramatic lighting, highly detailed.";
+    else if (style === 'Comic Book') stylePrefix = "Comic book panel, ink outlines, vivid colors, graphic novel style.";
+    else if (style === 'Watercolor') stylePrefix = "Expressive watercolor painting, loose artistic brush strokes.";
+    else if (style === '3D Render') stylePrefix = "High-quality 3D render, stylized but detailed, cinematic lighting.";
+    else if (style === 'Vintage Film') stylePrefix = "Vintage 35mm film still, grainy, retro color grading, nostalgic aesthetic.";
+
+    let prompt = `Context: ${activeSketch?.premise || activeSketch?.title}. Focus on creating a storyboard panel for THIS SPECIFIC SHOT: A ${shot.type} shot of ${shot.subject}. Location: ${location}. `;
+    if (shot.cameraMove !== 'Locked Off') prompt += `Framed for a ${shot.cameraMove} camera movement. `;
+    if (shot.action) prompt += `Action: ${shot.action} `;
+    if (charContext) prompt += `\n\nCRITICAL LIKENESS INSTRUCTIONS: The characters in this shot must match these exact physical descriptions: ${charContext}. Do not deviate from these physical traits. \n\n`;
+    if (shot.notes) prompt += `Visual Notes: ${shot.notes}. `;
+    prompt += `${stylePrefix} PURE ARTWORK ONLY. NO TEXT, NO WORDS, NO TITLES, NO WATERMARKS in the image.`;
+    return prompt;
+  };
+
+  const generateImage = async (shotId) => {
+    const activeKey = userApiKey.trim();
+    if (!activeKey) return alert("You need to enter your own personal Gemini API Key in the sidebar Settings to generate images.");
+    
+    setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: true }));
+    const shot = activeShots.find(s => s.id === shotId);
+    const promptText = getShotPrompt(shot);
+
+    const maxRetries = 6; let delay = 3000;
+    try {
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              instances: { prompt: promptText }, 
+              parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } 
+            })
+          });
+
+          if (response.status === 429) throw new Error("429");
+          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+
+          const result = await response.json();
+          const rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+          
+          setFullResImages(prev => ({ ...prev, [shotId]: rawImageUrl }));
+
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let width = img.width; let height = img.height;
+            const MAX_WIDTH = 800; 
+            if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
+            canvas.width = width; canvas.height = height;
+            const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
+            updateShot(shotId, 'image', canvas.toDataURL('image/jpeg', 0.7));
+          };
+          img.src = rawImageUrl;
+          break; 
+        } catch (error) {
+          if (i === maxRetries - 1) {
+            if (error.message === "429") alert(`Union Break! The Image AI hit a rate limit.`); 
+            else alert(`Image Error: ${error.message}`); 
+            throw error; 
+          }
+          await new Promise(r => setTimeout(r, delay)); delay *= 1.5; 
+        }
+      }
+    } finally { setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: false })); }
+  };
+
   // --- SCRIPT BREAKER LOGIC ---
   const analyzeScriptMetadata = async () => {
     if (!rawImportScript.trim()) return;
@@ -847,174 +918,6 @@ const App = () => {
       console.error(err);
       setScriptChunks(prev => prev.map((c, i) => i === chunkIndex ? {...c, status: 'error'} : c));
     }
-  };
-
-  const getShotPrompt = (shot) => {
-    const charContext = shot.shotCharacters?.length > 0 
-      ? shot.shotCharacters.map(n => {
-          const profile = activeProfiles.find(p => p.name === n);
-          if (!profile) return n;
-          return `${n} (${profile.age}yo ${profile.sex || 'Person'}, ${getGenderText(profile.gender || 50)}, ${getSkinText(profile.melanin || 50)}. ${profile.desc || ''})`;
-        }).join(', ') 
-      : richCharactersContext;
-
-    const location = shot.sceneHeading || 'LOCATION';
-    const style = activeSketch?.imageStyle || 'Pencil Sketch';
-    
-    let stylePrefix = "Rough storyboard sketch, mixed media graphite and colored pencil.";
-    if (style === 'Photographic') stylePrefix = "High-resolution photograph, photorealistic, 85mm lens.";
-    else if (style === 'Cinematic') stylePrefix = "Cinematic movie still, anamorphic lens, dramatic lighting, highly detailed.";
-    else if (style === 'Comic Book') stylePrefix = "Comic book panel, ink outlines, vivid colors, graphic novel style.";
-    else if (style === 'Watercolor') stylePrefix = "Expressive watercolor painting, loose artistic brush strokes.";
-    else if (style === '3D Render') stylePrefix = "High-quality 3D render, stylized but detailed, cinematic lighting.";
-    else if (style === 'Vintage Film') stylePrefix = "Vintage 35mm film still, grainy, retro color grading, nostalgic aesthetic.";
-
-    let prompt = `Context: ${activeSketch?.premise || activeSketch?.title}. Focus on creating a storyboard panel for THIS SPECIFIC SHOT: A ${shot.type} shot of ${shot.subject}. Location: ${location}. `;
-    if (shot.cameraMove !== 'Locked Off') prompt += `Framed for a ${shot.cameraMove} camera movement. `;
-    if (shot.action) prompt += `Action: ${shot.action} `;
-    if (charContext) prompt += `Featuring: ${charContext}. `;
-    if (shot.notes) prompt += `Visual Notes: ${shot.notes}. `;
-    prompt += `${stylePrefix} PURE ARTWORK ONLY. NO TEXT, NO WORDS, NO TITLES, NO WATERMARKS in the image.`;
-    return prompt;
-  };
-
-  const generateImage = async (shotId) => {
-    const activeKey = userApiKey.trim();
-    if (!activeKey) return alert("You need to enter your own personal Gemini API Key in the sidebar Settings to generate images.");
-    
-    setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: true }));
-    const shot = activeShots.find(s => s.id === shotId);
-    let promptText = getShotPrompt(shot);
-
-    // Extract any existing character avatar images for this shot
-    const charImages = (shot.shotCharacters || [])
-      .map(n => activeProfiles.find(p => p.name === n)?.image)
-      .filter(img => img); // Keep only truthy base64 strings
-
-    const maxRetries = 6; let delay = 3000;
-    try {
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          let rawImageUrl = "";
-
-          // If we have character images, use the Multimodal Image-to-Image Engine
-          if (charImages.length > 0) {
-            promptText = `[CHARACTER REFERENCE PHOTOS ATTACHED] Use the attached images as strict visual references for the actors in this shot. Match their likeness, face, and presentation exactly. \n\n${promptText}`;
-            
-            const parts = charImages.map(img => ({
-              inlineData: {
-                mimeType: img.split(';')[0].split(':')[1],
-                data: img.split(',')[1]
-              }
-            }));
-            parts.push({ text: promptText });
-
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${activeKey}`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                contents: [{ role: "user", parts: parts }],
-                generationConfig: { responseModalities: ["IMAGE"] }
-              })
-            });
-
-            if (response.status === 429) throw new Error("429");
-            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
-
-            const result = await response.json();
-            const inlineData = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
-            if (!inlineData) throw new Error("No image data returned from model.");
-            rawImageUrl = `data:${inlineData.mimeType};base64,${inlineData.data}`;
-
-          } else {
-            // Standard Text-to-Image fallback
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                instances: { prompt: promptText }, 
-                parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } 
-              })
-            });
-
-            if (response.status === 429) throw new Error("429");
-            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
-
-            const result = await response.json();
-            rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
-          }
-          
-          setFullResImages(prev => ({ ...prev, [shotId]: rawImageUrl }));
-
-          // Resize for Canvas
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            let width = img.width; let height = img.height;
-            const MAX_WIDTH = 800; 
-            if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
-            canvas.width = width; canvas.height = height;
-            const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-            updateShot(shotId, 'image', canvas.toDataURL('image/jpeg', 0.7));
-          };
-          img.src = rawImageUrl;
-          break; 
-        } catch (error) {
-          if (i === maxRetries - 1) {
-            if (error.message === "429") alert(`Union Break! The Image AI hit a rate limit.`); 
-            else alert(`Image Error: ${error.message}`); 
-            throw error; 
-          }
-          await new Promise(r => setTimeout(r, delay)); delay *= 1.5; 
-        }
-      }
-    } finally { setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: false })); }
-  };
-
-  const generateCharAvatar = async (charId) => {
-    const activeKey = userApiKey.trim();
-    if (!activeKey) return alert("You need your own personal Gemini API Key in the sidebar Settings.");
-    
-    setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: true }));
-    const char = activeProfiles.find(c => c.id === charId);
-    const promptText = `A close-up cinematic headshot photograph of a ${char.age} year old ${char.sex || 'person'} with ${getSkinText(char.melanin)} who is ${getGenderText(char.gender)}. Vibe/Archetype: ${char.archetype}. Details: ${char.desc}. Plain neutral background. Highly detailed, photorealistic.`;
-
-    const maxRetries = 6; let delay = 3000;
-    try {
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: '1:1' } })
-          });
-
-          if (response.status === 429) throw new Error("429");
-          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
-
-          const result = await response.json();
-          const rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
-          
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = 256; canvas.height = 256;
-            const ctx = canvas.getContext('2d'); 
-            const size = Math.min(img.width, img.height);
-            const x = (img.width - size) / 2;
-            const y = (img.height - size) / 2;
-            ctx.drawImage(img, x, y, size, size, 0, 0, 256, 256);
-            updateChar(charId, 'image', canvas.toDataURL('image/jpeg', 0.8));
-          };
-          img.src = rawImageUrl;
-          break; 
-        } catch (error) {
-          if (i === maxRetries - 1) {
-            if (error.message === "429") alert(`Union Break! The Image AI hit a rate limit.`); 
-            else alert(`Image Error: ${error.message}`); 
-            throw error; 
-          }
-          await new Promise(r => setTimeout(r, delay)); delay *= 1.5; 
-        }
-      }
-    } finally { setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: false })); }
   };
 
   const autoExtractProps = async () => {
