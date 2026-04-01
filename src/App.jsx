@@ -761,45 +761,21 @@ const App = () => {
     const shot = activeShots.find(s => s.id === shotId);
     let promptText = getShotPrompt(shot);
 
-    const charImages = (shot.shotCharacters || [])
-      .map(n => activeProfiles.find(p => p.name === n)?.image)
-      .filter(img => img);
-
     const maxRetries = 6; let delay = 3000;
     try {
       for (let i = 0; i < maxRetries; i++) {
         try {
-          let rawImageUrl = "";
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } })
+          });
+          
+          if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
+          if (response.status === 429) throw new Error("429");
+          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
 
-          if (charImages.length > 0) {
-            promptText = `[CHARACTER REFERENCE PHOTOS ATTACHED] Use the attached images as strict visual references for the actors in this shot. Match their likeness, face, and presentation exactly. \n\n${promptText}`;
-            const parts = charImages.map(img => ({ inlineData: { mimeType: img.split(';')[0].split(':')[1], data: img.split(',')[1] } }));
-            parts.push({ text: promptText });
-
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${activeKey}`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ role: "user", parts: parts }], generationConfig: { responseModalities: ["IMAGE"] } })
-            });
-            if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
-            if (response.status === 429) throw new Error("429");
-            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
-
-            const result = await response.json();
-            const inlineData = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
-            if (!inlineData) throw new Error("No image data returned from model.");
-            rawImageUrl = `data:${inlineData.mimeType};base64,${inlineData.data}`;
-          } else {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } })
-            });
-            if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
-            if (response.status === 429) throw new Error("429");
-            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
-
-            const result = await response.json();
-            rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
-          }
+          const result = await response.json();
+          const rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
           
           setFullResImages(prev => ({ ...prev, [shotId]: rawImageUrl }));
 
