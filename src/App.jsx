@@ -1285,7 +1285,7 @@ const App = () => {
   }
 
   return (
-    <div className="flex h-screen w-full bg-zinc-950 text-zinc-100 font-sans selection:bg-orange-500/30 overflow-hidden relative">
+    <div className="flex h-screen w-full bg-zinc-950 text-zinc-100 font-sans selection:bg-orange-500/30 overflow-hidden relative print:block print:h-auto print:overflow-visible print:bg-white">
       
       {/* --- THE TEASER MODAL (FORCED LOGIN GATE) --- */}
       {!isRealUser && !isGuest && (
@@ -1437,12 +1437,12 @@ const App = () => {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0 h-full relative">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative print:block print:h-auto print:overflow-visible">
         <button onClick={() => setSidebarOpen(!isSidebarOpen)} className="absolute left-0 top-1/2 -translate-y-1/2 bg-zinc-800 p-1.5 md:p-1 rounded-r-md z-20 transition-all hover:bg-orange-500 hidden md:block print:hidden">
           <ChevronRight className={isSidebarOpen ? 'rotate-180' : ''} size={16} />
         </button>
 
-        <div className="flex-1 overflow-y-auto w-full relative">
+        <div className="flex-1 overflow-y-auto w-full relative print:block print:h-auto print:overflow-visible">
           
           {/* REDESIGNED NAVIGATION HEADER */}
           <header className={`p-4 md:p-6 border-b border-zinc-800 bg-zinc-950 md:backdrop-blur-xl sticky top-0 z-20 w-full shrink-0 shadow-lg transition-colors print:hidden`}>
@@ -2170,7 +2170,7 @@ const App = () => {
                 
                 {/* PRINT VIEWS (Full screen takeover rendered via CSS) */}
                 {(boardSubTab === 'print-boards' || boardSubTab === 'print-list') && (
-                  <div className="print:absolute print:inset-0 print:bg-white print:text-black print:z-[999] min-h-screen bg-white text-black p-6 md:p-12 font-serif rounded-[2rem] shadow-2xl overflow-y-auto">
+                  <div className="print:block print:bg-white print:text-black min-h-screen bg-white text-black p-6 md:p-12 font-serif rounded-[2rem] shadow-2xl print:shadow-none print:rounded-none print:p-0 print:m-0 print:overflow-visible">
                     <div className="flex items-center gap-2 print:hidden mb-12 border-b-2 border-black pb-6 justify-between">
                       <button onClick={() => setBoardSubTab('grid')} className="flex items-center gap-2 px-4 py-2 bg-black hover:bg-zinc-800 transition-colors text-white rounded-full text-xs font-bold shadow-lg">
                         <ArrowLeft size={14} /> EXIT PRINT PREVIEW
