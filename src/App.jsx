@@ -761,19 +761,45 @@ const App = () => {
     const shot = activeShots.find(s => s.id === shotId);
     let promptText = getShotPrompt(shot);
 
+    const charImages = (shot.shotCharacters || [])
+      .map(n => activeProfiles.find(p => p.name === n)?.image)
+      .filter(img => img);
+
     const maxRetries = 6; let delay = 3000;
     try {
       for (let i = 0; i < maxRetries; i++) {
         try {
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } })
-          });
-          if (response.status === 429) throw new Error("429");
-          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+          let rawImageUrl = "";
 
-          const result = await response.json();
-          const rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+          if (charImages.length > 0) {
+            promptText = `[CHARACTER REFERENCE PHOTOS ATTACHED] Use the attached images as strict visual references for the actors in this shot. Match their likeness, face, and presentation exactly. \n\n${promptText}`;
+            const parts = charImages.map(img => ({ inlineData: { mimeType: img.split(';')[0].split(':')[1], data: img.split(',')[1] } }));
+            parts.push({ text: promptText });
+
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${activeKey}`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ role: "user", parts: parts }], generationConfig: { responseModalities: ["IMAGE"] } })
+            });
+            if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
+            if (response.status === 429) throw new Error("429");
+            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+
+            const result = await response.json();
+            const inlineData = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
+            if (!inlineData) throw new Error("No image data returned from model.");
+            rawImageUrl = `data:${inlineData.mimeType};base64,${inlineData.data}`;
+          } else {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } })
+            });
+            if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
+            if (response.status === 429) throw new Error("429");
+            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+
+            const result = await response.json();
+            rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+          }
           
           setFullResImages(prev => ({ ...prev, [shotId]: rawImageUrl }));
 
@@ -790,6 +816,36 @@ const App = () => {
           img.src = rawImageUrl;
           break; 
         } catch (error) {
+          if (error.message === "FREE_TIER") {
+            if (!sessionStorage.getItem('sb_free_warn')) {
+              alert("Heads up: Your Gemini API key is on the Free Tier, which Google blocks from their image generator.\n\nTo save the shoot, I am dynamically rerouting your image requests to an open-source indie engine (Pollinations.ai) so you can still build your board!");
+              sessionStorage.setItem('sb_free_warn', 'true');
+            }
+            const aspectMap = { '16:9': {w: 800, h: 450}, '1:1': {w: 512, h: 512}, '4:3': {w: 800, h: 600}, '9:16': {w: 450, h: 800}, '3:4': {w: 600, h: 800} };
+            const dims = aspectMap[activeSketch?.aspectRatio || '16:9'];
+            const safePrompt = encodeURIComponent((promptText.substring(0, 900) + " cinematic lighting, highly detailed").trim());
+            const fResp = await fetch(`https://image.pollinations.ai/prompt/${safePrompt}?width=${dims.w}&height=${dims.h}&nologo=true&seed=${Math.floor(Math.random()*10000)}`);
+            const blob = await fResp.blob();
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const fallbackUrl = reader.result;
+              setFullResImages(prev => ({ ...prev, [shotId]: fallbackUrl }));
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width; let height = img.height;
+                const MAX_WIDTH = 800; 
+                if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
+                canvas.width = width; canvas.height = height;
+                const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
+                updateShot(shotId, 'image', canvas.toDataURL('image/jpeg', 0.7));
+              };
+              img.src = fallbackUrl;
+            };
+            reader.readAsDataURL(blob);
+            break; // Exit the Google retry loop since the free fallback succeeded
+          }
+
           if (i === maxRetries - 1) {
             if (error.message === "429") alert(`Union Break! The Image AI hit a rate limit.`); 
             else alert(`Image Error: ${error.message}`); 
@@ -799,6 +855,82 @@ const App = () => {
         }
       }
     } finally { setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: false })); }
+  };
+
+  const generateCharAvatar = async (charId) => {
+    const activeKey = userApiKey.trim();
+    if (!activeKey) return alert("API Key missing! Please enter your personal Gemini API key in the sidebar Settings panel.");
+    
+    setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: true }));
+    const char = activeProfiles.find(c => c.id === charId);
+    const promptText = `A close-up cinematic headshot photograph of a ${char.age} year old ${char.sex || 'person'} with ${getSkinText(char.melanin)} who is ${getGenderText(char.gender)}. Vibe/Archetype: ${char.archetype}. Details: ${char.desc}. Plain neutral background. Highly detailed, photorealistic.`;
+
+    const maxRetries = 6; let delay = 3000;
+    try {
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: '1:1' } })
+          });
+
+          if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
+          if (response.status === 429) throw new Error("429");
+          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+
+          const result = await response.json();
+          const rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+          
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 256;
+            const ctx = canvas.getContext('2d'); 
+            const size = Math.min(img.width, img.height);
+            const x = (img.width - size) / 2;
+            const y = (img.height - size) / 2;
+            ctx.drawImage(img, x, y, size, size, 0, 0, 256, 256);
+            updateChar(charId, 'image', canvas.toDataURL('image/jpeg', 0.8));
+          };
+          img.src = rawImageUrl;
+          break; 
+        } catch (error) {
+          if (error.message === "FREE_TIER") {
+             if (!sessionStorage.getItem('sb_free_warn')) {
+               alert("Heads up: Your Gemini API key is on the Free Tier, which Google blocks from their image generator.\n\nTo save the shoot, I am dynamically rerouting your image requests to an open-source indie engine (Pollinations.ai) so you can still build your board!");
+               sessionStorage.setItem('sb_free_warn', 'true');
+             }
+             const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim());
+             const fResp = await fetch(`https://image.pollinations.ai/prompt/${safePrompt}?width=512&height=512&nologo=true&seed=${Math.floor(Math.random()*10000)}`);
+             const blob = await fResp.blob();
+             const reader = new FileReader();
+             reader.onloadend = () => {
+                const img = new Image();
+                img.onload = () => {
+                  const canvas = document.createElement('canvas');
+                  canvas.width = 256; canvas.height = 256;
+                  const ctx = canvas.getContext('2d'); 
+                  const size = Math.min(img.width, img.height);
+                  const x = (img.width - size) / 2;
+                  const y = (img.height - size) / 2;
+                  ctx.drawImage(img, x, y, size, size, 0, 0, 256, 256);
+                  updateChar(charId, 'image', canvas.toDataURL('image/jpeg', 0.8));
+                };
+                img.src = reader.result;
+             };
+             reader.readAsDataURL(blob);
+             break; // Exit the Google retry loop
+          }
+
+          if (i === maxRetries - 1) {
+            if (error.message === "429") alert(`Union Break! The Image AI hit a rate limit.`); 
+            else alert(`Image Error: ${error.message}`); 
+            throw error; 
+          }
+          await new Promise(r => setTimeout(r, delay)); delay *= 1.5; 
+        }
+      }
+    } finally { setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: false })); }
   };
 
   // --- SCRIPT BREAKER LOGIC ---
