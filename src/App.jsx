@@ -98,10 +98,6 @@ const App = () => {
     { id: 's1', sketchId: '1', number: 1, type: 'Wide', cameraMove: 'Locked Off', duration: 8, subject: 'THE DASHBOARD', action: 'Welcome to SketchBeans! The key details of your sketch live right up there under the title. \n\nClick the "SCENE CONFIG" tab to change your location, comedic tone, and visual style.', notes: 'Keep the premise simple. The AI uses it to build everything else.', dialogue: '', fx: false, image: null, sceneHeading: 'INT. THE EDIT BAY - NIGHT', shotCharacters: [] }
   ]);
 
-  // --- PUBLIC STATE (WRITER'S ROOM) ---
-  const [publicSketches, setPublicSketches] = useState([]);
-  const [publicShots, setPublicShots] = useState([]);
-
   // --- UI & TAB STATE ---
   const [activeSketchId, setActiveSketchId] = useState(localStorage.getItem('sketchbeans_active_sketch') || '1');
   const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
@@ -129,7 +125,7 @@ const App = () => {
   const [history, setHistory] = useState({});
 
   const [isSyncing, setIsSyncing] = useState(false);
-  const isInitialLoad = useRef({ sketches: true, shots: true, pubSketches: true, pubShots: true });
+  const isInitialLoad = useRef({ sketches: true, shots: true });
   const [hasLoadedCloudData, setHasLoadedCloudData] = useState(false);
   const autosaveTimeout = useRef(null);
   const isDirty = useRef(false); 
@@ -137,19 +133,13 @@ const App = () => {
   const apiKey = globalGeminiKey; 
 
   // --- DERIVED CONTEXT LOGIC ---
-  const isWritersRoom = activeSketchId.startsWith('pub_');
-  const activeDataSourceSketches = isWritersRoom ? publicSketches : sketches;
-  const activeDataSourceShots = isWritersRoom ? publicShots : shots;
-  
-  const activeSketch = activeDataSourceSketches.find(s => s.id === activeSketchId) || activeDataSourceSketches[0] || sketches[0];
-  const activeShots = activeDataSourceShots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
+  const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
+  const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
   const currentDisplayList = boardSubTab === 'shoot-plan' && shootPlan.length > 0 ? shootPlan : activeShots;
   
   const totalDurationSeconds = activeShots.reduce((acc, shot) => acc + (parseInt(shot.duration) || 0), 0);
-  
   const activePropsList = Array.isArray(activeSketch?.props) ? activeSketch.props : (activeSketch?.props ? String(activeSketch.props).split(',').map(s => s.trim()).filter(s => s) : []);
 
-  const isOriginalAuthor = isWritersRoom && activeSketch?.originalAuthorId === user?.uid;
   const activeProfiles = activeSketch?.characterProfiles || [];
   const availableCharacters = activeProfiles.map(c => c.name);
   const richCharactersContext = activeProfiles.map(c => {
@@ -219,17 +209,7 @@ const App = () => {
       }
     });
 
-    const unsubPubSketches = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'shared_sketches'), (snap) => {
-      setPublicSketches(snap.docs.map(d => ({id: d.id, ...d.data()})));
-      isInitialLoad.current.pubSketches = false;
-    }, (err) => console.warn("Writer's Room access denied. Check Firebase Rules:", err.message));
-
-    const unsubPubShots = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'shared_shots'), (snap) => {
-      setPublicShots(snap.docs.map(d => ({id: d.id, ...d.data()})));
-      isInitialLoad.current.pubShots = false;
-    }, (err) => console.warn("Writer's Room shots access denied. Check Firebase Rules:", err.message));
-
-    return () => { unsubSketches(); unsubShots(); unsubPubSketches(); unsubPubShots(); };
+    return () => { unsubSketches(); unsubShots(); };
   }, [isRealUser, user]);
 
   const loginWithProvider = async () => {
@@ -269,21 +249,15 @@ const App = () => {
 
   const updateContextState = (stateUpdater, isSketch) => {
     isDirty.current = true;
-    if (isWritersRoom) {
-      if (isSketch) setPublicSketches(stateUpdater); else setPublicShots(stateUpdater);
-    } else {
-      if (isSketch) setSketches(stateUpdater); else setShots(stateUpdater);
-    }
+    if (isSketch) setSketches(stateUpdater); else setShots(stateUpdater);
   };
 
   const updateSketch = (id, field, value) => {
-    const editorTag = isWritersRoom ? { lastEditedBy: user?.email || 'Guest' } : {};
-    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value, ...editorTag } : s), true);
+    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s), true);
   };
   
   const updateShot = (id, field, value) => {
-    const editorTag = isWritersRoom ? { lastEditedBy: user?.email || 'Guest' } : {};
-    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value, ...editorTag } : s), false);
+    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s), false);
   };
 
   const handleAddProp = (e) => {
@@ -316,7 +290,7 @@ const App = () => {
   const addShot = () => {
     const nextNumber = activeShots.length > 0 ? Math.max(...activeShots.map(s => s.number)) + 1 : 1;
     const lastHeading = activeShots.length > 0 ? activeShots[activeShots.length - 1].sceneHeading : 'INT. LOCATION - DAY';
-    updateContextState(prev => [...prev, { id: (isWritersRoom ? 'pub_' : '') + Date.now().toString(), sketchId: activeSketchId, number: nextNumber, type: 'Medium', cameraMove: 'Locked Off', duration: 5, subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, sceneHeading: lastHeading, shotCharacters: [] }], false);
+    updateContextState(prev => [...prev, { id: Date.now().toString(), sketchId: activeSketchId, number: nextNumber, type: 'Medium', cameraMove: 'Locked Off', duration: 5, subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, sceneHeading: lastHeading, shotCharacters: [] }], false);
   };
   
   const insertShotAt = (index, position) => {
@@ -324,7 +298,7 @@ const App = () => {
     const insertIndex = position === 'before' ? index : index + 1;
     const inheritedHeading = currentActiveShots[index]?.sceneHeading || 'INT. LOCATION - DAY';
     const newShot = { 
-      id: (isWritersRoom ? 'pub_' : '') + Date.now().toString(), sketchId: activeSketchId, type: 'Medium', cameraMove: 'Locked Off', duration: 5,
+      id: Date.now().toString(), sketchId: activeSketchId, type: 'Medium', cameraMove: 'Locked Off', duration: 5,
       subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, sceneHeading: inheritedHeading, shotCharacters: [] 
     };
     currentActiveShots.splice(insertIndex, 0, newShot);
@@ -339,8 +313,7 @@ const App = () => {
     updateContextState(prev => prev.filter(s => s.id !== shotId), false);
     if (user && isRealUser) {
       try { 
-        const path = isWritersRoom ? ['public', 'data', 'shared_shots'] : ['users', user.uid, 'shots'];
-        await deleteDoc(doc(db, 'artifacts', appId, ...path, shotId)); 
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', shotId)); 
       } catch (e) {}
     }
   };
@@ -379,25 +352,18 @@ const App = () => {
   const confirmDeleteSketch = async () => {
     if (!sketchToDelete) return;
     const id = sketchToDelete.id;
-    const isDeletingShared = id.startsWith('pub_');
     
-    if (isDeletingShared) {
-      setPublicSketches(prev => prev.filter(s => s.id !== id));
-      setPublicShots(prev => prev.filter(s => s.sketchId !== id));
-      if (activeSketchId === id) setActiveSketchId(sketches[0]?.id || '1');
-      if (user && isRealUser) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_sketches', id));
-    } else {
-      const updatedSketches = sketches.filter(s => s.id !== id);
-      if (updatedSketches.length === 0) {
-        const newId = Date.now().toString();
-        updatedSketches.push({ id: newId, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '' });
-        setActiveSketchId(newId);
-      } else if (activeSketchId === id) setActiveSketchId(updatedSketches[0].id);
-      
-      setSketches(updatedSketches);
-      setShots(prev => prev.filter(s => s.sketchId !== id));
-      if (user && isRealUser) try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', id)); } catch (err) {}
-    }
+    const updatedSketches = sketches.filter(s => s.id !== id);
+    if (updatedSketches.length === 0) {
+      const newId = Date.now().toString();
+      updatedSketches.push({ id: newId, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '' });
+      setActiveSketchId(newId);
+    } else if (activeSketchId === id) setActiveSketchId(updatedSketches[0].id);
+    
+    setSketches(updatedSketches);
+    setShots(prev => prev.filter(s => s.sketchId !== id));
+    if (user && isRealUser) try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', id)); } catch (err) {}
+    
     setSketchToDelete(null);
   };
 
@@ -409,21 +375,12 @@ const App = () => {
       const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase network timeout. Save aborted.")), 8000));
       
       const saveTask = async () => {
-        if (isWritersRoom) {
-          const s = publicSketches.find(sk => sk.id === activeSketchId);
-          if (s) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_sketches', s.id), { ...s, lastEditedBy: user.email || user.displayName }, { merge: true });
-          
-          const activePubShots = publicShots.filter(sh => sh.sketchId === activeSketchId);
-          const shotPromises = activePubShots.map(shot => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_shots', shot.id), { ...shot, lastEditedBy: user.email || user.displayName }, { merge: true }));
-          await Promise.all(shotPromises);
-        } else {
-          const s = sketches.find(sk => sk.id === activeSketchId);
-          if (s) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', s.id), s, { merge: true });
-          
-          const activePrivShots = shots.filter(sh => sh.sketchId === activeSketchId);
-          const shotPromises = activePrivShots.map(shot => setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', shot.id), shot, { merge: true }));
-          await Promise.all(shotPromises);
-        }
+        const s = sketches.find(sk => sk.id === activeSketchId);
+        if (s) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', s.id), s, { merge: true });
+        
+        const activePrivShots = shots.filter(sh => sh.sketchId === activeSketchId);
+        const shotPromises = activePrivShots.map(shot => setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', shot.id), shot, { merge: true }));
+        await Promise.all(shotPromises);
       };
 
       await Promise.race([saveTask(), timeoutPromise]);
@@ -448,114 +405,7 @@ const App = () => {
     }, 5000);
     
     return () => clearTimeout(autosaveTimeout.current);
-  }, [sketches, shots, publicSketches, publicShots, activeSketchId, isRealUser, authResolved, hasLoadedCloudData]);
-
-  const openWritersRoom = async () => {
-    if (isWritersRoom || !activeSketch) return;
-    const pubId = `pub_${activeSketch.id}`;
-    const pubSketch = { ...activeSketch, id: pubId, originalAuthorId: user.uid, originalAuthorName: user.displayName || user.email };
-    setPublicSketches(prev => [...prev, pubSketch]);
-    
-    const localShots = shots.filter(s => s.sketchId === activeSketch.id);
-    const pubShots = localShots.map(s => ({ ...s, id: `pub_${s.id}`, sketchId: pubId }));
-    setPublicShots(prev => [...prev, ...pubShots]);
-    
-    setActiveSketchId(pubId);
-    if (isRealUser) {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_sketches', pubId), pubSketch);
-      for (const shot of pubShots) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_shots', shot.id), shot);
-    }
-  };
-
-  const pullToMaster = async () => {
-    if (!isOriginalAuthor) return;
-    const privateId = activeSketch.id.replace('pub_', '');
-    const updatedSketch = { ...activeSketch, id: privateId };
-    setSketches(prev => prev.map(s => s.id === privateId ? updatedSketch : s));
-    
-    const sharedShotsForSketch = publicShots.filter(s => s.sketchId === activeSketch.id);
-    const privateShots = sharedShotsForSketch.map(s => ({ ...s, id: s.id.replace('pub_', ''), sketchId: privateId }));
-    
-    setShots(prev => {
-      const otherShots = prev.filter(s => s.sketchId !== privateId);
-      return [...otherShots, ...privateShots];
-    });
-
-    if (isRealUser) {
-      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', privateId), updatedSketch);
-      for (const shot of privateShots) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', shot.id), shot);
-      alert("Successfully pulled edits from the Writer's Room to your Private Master.");
-    }
-  };
-
-  const revertWritersRoom = async () => {
-    if (!isOriginalAuthor) return;
-    if (!window.confirm("WARNING: This will nuke the public Writer's Room branch and overwrite it with your private Master copy. Continue?")) return;
-    const privateId = activeSketch.id.replace('pub_', '');
-    const privateSketch = sketches.find(s => s.id === privateId);
-    const privateShotsLocal = shots.filter(s => s.sketchId === privateId);
-    if (!privateSketch) return;
-
-    const restoredPubSketch = { ...privateSketch, id: activeSketch.id, originalAuthorId: user.uid, originalAuthorName: user.displayName || user.email };
-    const restoredPubShots = privateShotsLocal.map(s => ({ ...s, id: `pub_${s.id}`, sketchId: activeSketch.id }));
-
-    setPublicSketches(prev => prev.map(s => s.id === activeSketch.id ? restoredPubSketch : s));
-    setPublicShots(prev => {
-      const others = prev.filter(s => s.sketchId !== activeSketch.id);
-      return [...others, ...restoredPubShots];
-    });
-
-    if (isRealUser) {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_sketches', activeSketch.id), restoredPubSketch);
-      for (const shot of restoredPubShots) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_shots', shot.id), shot);
-    }
-  };
-
-  const cloneFromWritersRoom = async () => {
-    if (!user || !isRealUser || !activeSketch) return;
-    setIsSyncing(true);
-    try {
-      // 1. Create a brand new unique ID for the local clone
-      const newSketchId = `clone_${Date.now()}`;
-      
-      // 2. Deep copy the active project, stripping out the public ownership tags
-      const clonedSketch = {
-        ...activeSketch,
-        id: newSketchId,
-        title: `[Fork] ${activeSketch.title}`,
-        originalAuthorId: user.uid, // They own this copy now
-        originalAuthorName: user.displayName || user.email
-      };
-      
-      // 3. Find only the shots associated with THIS specific project and assign them new IDs
-      const shotsToClone = publicShots.filter(s => s.sketchId === activeSketch.id);
-      const clonedShots = shotsToClone.map((shot, idx) => ({
-        ...shot,
-        id: `clone_shot_${Date.now()}_${idx}`,
-        sketchId: newSketchId
-      }));
-
-      // 4. Update the local React state
-      setSketches(prev => [...prev, clonedSketch]);
-      setShots(prev => [...prev, ...clonedShots]);
-      setActiveSketchId(newSketchId); // Instantly drop them into their new private copy
-
-      // 5. Fire it off to their private Firebase collection
-      let batch = writeBatch(db);
-      batch.set(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', newSketchId), clonedSketch);
-      clonedShots.forEach(shot => {
-        batch.set(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', shot.id), shot);
-      });
-      await batch.commit();
-      
-      alert("Successfully cloned to your private rig! You can now edit safely without touching the master.");
-    } catch (err) {
-      console.error("Clone error:", err);
-      alert("Failed to clone: " + err.message);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
+  }, [sketches, shots, activeSketchId, isRealUser, authResolved, hasLoadedCloudData]);
 
   const handleImageUpload = (shotId, event) => {
     const file = event.target.files?.[0];
@@ -612,7 +462,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "6.2", timestamp: new Date().toISOString(), sketches, shots, publicSketches, publicShots };
+    const data = { version: "6.3", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -620,12 +470,12 @@ const App = () => {
   };
 
   const exportSingleSketch = (sketchId) => {
-    const targetSketch = sketches.find(s => s.id === sketchId) || publicSketches.find(s => s.id === sketchId);
-    const targetShots = shots.filter(s => s.sketchId === sketchId).concat(publicShots.filter(s => s.sketchId === sketchId));
+    const targetSketch = sketches.find(s => s.id === sketchId);
+    const targetShots = shots.filter(s => s.sketchId === sketchId);
     
     if (!targetSketch) return;
 
-    const data = { version: "6.2", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "6.3", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -779,6 +629,94 @@ const App = () => {
     } finally { setIsAIBusy(false); }
   };
 
+  const getShotPrompt = (shot) => {
+    const charContext = shot.shotCharacters?.length > 0 
+      ? shot.shotCharacters.map(n => {
+          const profile = activeProfiles.find(p => p.name === n);
+          if (!profile) return n;
+          return `${n} (A ${profile.age} year old ${profile.sex || 'person'}, ${getGenderText(profile.gender || 50)}, ${getSkinText(profile.melanin || 50)}. Visual traits: ${profile.desc || ''})`;
+        }).join(', ') 
+      : "";
+
+    const location = shot.sceneHeading || 'LOCATION';
+    const style = activeSketch?.imageStyle || 'Pencil Sketch';
+    
+    let stylePrefix = "";
+    if (style === 'Photographic') stylePrefix = "High-resolution photograph, photorealistic, 85mm lens, cinematic lighting.";
+    else if (style === 'Cinematic') stylePrefix = "Cinematic movie still, anamorphic lens, dramatic lighting, highly detailed, 35mm film.";
+    else if (style === 'Comic Book') stylePrefix = "Comic book art panel, vivid colors, graphic novel ink style.";
+    else if (style === 'Watercolor') stylePrefix = "Expressive watercolor painting, loose artistic brush strokes.";
+    else if (style === '3D Render') stylePrefix = "High-quality 3D render, stylized but detailed, Unreal Engine style.";
+    else if (style === 'Vintage Film') stylePrefix = "Vintage 35mm film still, grainy, retro color grading, nostalgic aesthetic.";
+    else stylePrefix = "Rough storyboard sketch, mixed media graphite and colored pencil.";
+
+    let prompt = `CRITICAL INSTRUCTION: Generate a SINGLE, borderless, full-bleed image. ABSOLUTELY NO TEXT, NO BORDERS, NO ARROWS, NO WATERMARKS, NO STORYBOARD MARKS. Just the pure artwork.\n\n`;
+    prompt += `VISUAL STYLE: ${stylePrefix}\n\n`;
+    prompt += `SCENE CONTEXT: ${activeSketch?.premise || activeSketch?.title}\n`;
+    prompt += `LOCATION: ${location}\n\n`;
+    prompt += `IMAGE TO GENERATE: A ${shot.type} shot of ${shot.subject}. `;
+    if (shot.cameraMove !== 'Locked Off') prompt += `The camera is moving: ${shot.cameraMove}. `;
+    if (shot.action) prompt += `Action happening in frame: ${shot.action} `;
+    
+    if (charContext) prompt += `\n\nSUBJECT DETAILS (Strict Likeness): The characters in this frame must match these descriptions exactly: ${charContext}.`;
+    
+    if (shot.notes) prompt += `\n\nDIRECTOR NOTES: ${shot.notes}`;
+
+    return prompt;
+  };
+
+  const generateImage = async (shotId) => {
+    const activeKey = userApiKey.trim();
+    if (!activeKey) return alert("You need to enter your own personal Gemini API Key in the sidebar Settings to generate images.");
+    
+    setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: true }));
+    const shot = activeShots.find(s => s.id === shotId);
+    const promptText = getShotPrompt(shot);
+
+    const maxRetries = 6; let delay = 3000;
+    try {
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              instances: { prompt: promptText }, 
+              parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } 
+            })
+          });
+
+          if (response.status === 429) throw new Error("429");
+          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+
+          const result = await response.json();
+          const rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+          
+          setFullResImages(prev => ({ ...prev, [shotId]: rawImageUrl }));
+
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let width = img.width; let height = img.height;
+            const MAX_WIDTH = 800; 
+            if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
+            canvas.width = width; canvas.height = height;
+            const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
+            updateShot(shotId, 'image', canvas.toDataURL('image/jpeg', 0.7));
+          };
+          img.src = rawImageUrl;
+          break; 
+        } catch (error) {
+          if (i === maxRetries - 1) {
+            if (error.message === "429") alert(`Union Break! The Image AI hit a rate limit.`); 
+            else alert(`Image Error: ${error.message}`); 
+            throw error; 
+          }
+          await new Promise(r => setTimeout(r, delay)); delay *= 1.5; 
+        }
+      }
+    } finally { setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: false })); }
+  };
+
   // --- SCRIPT BREAKER LOGIC ---
   const analyzeScriptMetadata = async () => {
     if (!rawImportScript.trim()) return;
@@ -878,7 +816,7 @@ const App = () => {
             
             const newShotsData = result.shots.map((s, idx) => ({ 
               ...s, 
-              id: (isWritersRoom ? 'pub_' : '') + `ai-chunk-${Date.now()}-${idx}`, 
+              id: `ai-chunk-${Date.now()}-${idx}`, 
               sketchId: activeSketchId, 
               number: maxNum + idx + 1, 
               fx: false, 
@@ -948,7 +886,7 @@ const App = () => {
           
           const newShots = newShotsData.map((s, idx) => ({ 
             ...s, 
-            id: (isWritersRoom ? 'pub_' : '') + `ai-${Date.now()}-${idx}`, 
+            id: `ai-${Date.now()}-${idx}`, 
             sketchId: activeSketchId, 
             number: maxNum + idx + 1, 
             fx: false, 
@@ -981,7 +919,7 @@ const App = () => {
           
           const newShot = {
             ...newShotData, 
-            id: (isWritersRoom ? 'pub_' : '') + `ai-single-${Date.now()}`, 
+            id: `ai-single-${Date.now()}`, 
             sketchId: activeSketchId, 
             number: maxNum + 1,
             fx: false, 
@@ -1161,7 +1099,7 @@ const App = () => {
         <nav className="flex-1 overflow-y-auto px-3 space-y-1 pb-4">
           <div className="text-[10px] font-black text-zinc-600 uppercase tracking-widest px-3 mb-2">My Projects</div>
           {sketches.map(sketch => (
-            <div key={sketch.id} className={`w-full group text-left px-3 py-2 rounded-lg flex items-center justify-between transition-colors ${activeSketchId === sketch.id && !isWritersRoom ? 'bg-zinc-800 text-orange-400' : 'text-zinc-400 hover:bg-zinc-800/50'}`}>
+            <div key={sketch.id} className={`w-full group text-left px-3 py-2 rounded-lg flex items-center justify-between transition-colors ${activeSketchId === sketch.id ? 'bg-zinc-800 text-orange-400' : 'text-zinc-400 hover:bg-zinc-800/50'}`}>
               <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0">
                 <FileText size={16} className="shrink-0" /> <span className="truncate font-medium text-sm">{sketch.title || 'Untitled'}</span>
               </button>
@@ -1176,27 +1114,6 @@ const App = () => {
             </div>
           ))}
           <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW PROJECT</button>
-
-          {/* PUBLIC WRITER'S ROOM LIST */}
-          <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest px-3 mt-8 mb-2 flex items-center gap-1"><Users size={12}/> The Writer's Room</div>
-          {publicSketches.map(sketch => (
-            <div key={sketch.id} className={`w-full group text-left px-3 py-2 rounded-lg flex items-center justify-between transition-colors ${activeSketchId === sketch.id && isWritersRoom ? 'bg-blue-900/30 text-blue-400 border border-blue-500/20' : 'text-zinc-400 hover:bg-zinc-800/50 border border-transparent'}`}>
-              <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0">
-                <GitBranch size={16} className="shrink-0" /> <span className="truncate font-medium text-sm">{sketch.title || 'Untitled'}</span>
-              </button>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={(e) => { e.stopPropagation(); exportSingleSketch(sketch.id); }} className="hover:text-blue-400 p-1.5" title="Export Project">
-                  <Download size={14} />
-                </button>
-                {sketch.originalAuthorId === user?.uid && (
-                  <button onClick={(e) => { e.stopPropagation(); setSketchToDelete(sketch); }} className="hover:text-red-400 p-1.5" title="Delete Shared Project">
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-          {publicSketches.length === 0 && <div className="px-3 text-xs text-zinc-600 italic">No shared projects.</div>}
         </nav>
 
         {/* CLOUD SYNC & BYOK PANEL */}
@@ -1240,7 +1157,7 @@ const App = () => {
 
           <div className="p-4 space-y-3">
             <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between">
-              <span className="flex items-center gap-2"><Cloud className="text-green-500" size={14} /> Cloud Rig</span>
+              <span className="flex items-center gap-2"><Cloud className="text-green-500" size={14} /> Private Cloud</span>
               {isSyncing && <span className="text-blue-500 flex items-center gap-1 animate-pulse"><Loader2 size={10} className="animate-spin"/> SAVING...</span>}
             </div>
             
@@ -1276,32 +1193,8 @@ const App = () => {
         <div className="flex-1 overflow-y-auto w-full relative">
           
           {/* REDESIGNED NAVIGATION HEADER */}
-          <header className={`p-4 md:p-6 border-b border-zinc-800 ${isWritersRoom ? 'bg-blue-950/20' : 'bg-zinc-950'} md:backdrop-blur-xl sticky top-0 z-20 w-full shrink-0 shadow-lg transition-colors print:hidden`}>
+          <header className={`p-4 md:p-6 border-b border-zinc-800 bg-zinc-950 md:backdrop-blur-xl sticky top-0 z-20 w-full shrink-0 shadow-lg transition-colors print:hidden`}>
             
-            {/* WRITER'S ROOM BANNER */}
-            {isWritersRoom && (
-              <div className="max-w-6xl mx-auto mb-4 bg-blue-600/10 border border-blue-500/30 rounded-xl p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <div>
-                  <h3 className="text-xs font-black text-blue-400 uppercase tracking-widest flex items-center gap-2"><GitBranch size={14}/> The Writer's Room (Public Branch)</h3>
-                  <p className="text-[10px] text-blue-300/70 mt-1">Read-only master. {isOriginalAuthor ? "You are the showrunner." : `Original author: ${activeSketch.originalAuthorName}`}</p>
-                </div>
-                <div className="flex gap-2 w-full sm:w-auto">
-                  {isOriginalAuthor ? (
-                    <>
-                      <button onClick={pullToMaster} className="flex-1 sm:flex-none flex items-center justify-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[9px] font-black transition-colors"><ArrowDownToLine size={12}/> PULL TO MASTER</button>
-                      <button onClick={revertWritersRoom} className="flex-1 sm:flex-none flex items-center justify-center gap-1 px-3 py-1.5 bg-red-900/50 hover:bg-red-600 text-red-200 hover:text-white border border-red-500/30 rounded text-[9px] font-black transition-colors"><ArrowUpFromLine size={12}/> NUKE & REVERT</button>
-                    </>
-                  ) : (
-                    isRealUser && (
-                      <button onClick={cloneFromWritersRoom} disabled={isSyncing} className="flex-1 sm:flex-none flex items-center justify-center gap-1 px-4 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded text-[10px] font-black transition-colors shadow-lg shadow-green-900/20 disabled:opacity-50">
-                        {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <Copy size={12}/>} CLONE TO MY RIG
-                      </button>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-
             <div className="max-w-6xl mx-auto flex flex-col gap-4">
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
@@ -1309,12 +1202,6 @@ const App = () => {
                     <button onClick={() => setSidebarOpen(true)} className="md:hidden text-zinc-400 hover:text-white shrink-0"><Menu size={24}/></button>
                     <input value={activeSketch?.title || ''} onChange={(e) => updateSketch(activeSketchId, 'title', e.target.value)} className="bg-transparent text-2xl md:text-4xl font-black focus:outline-none w-full tracking-tighter truncate" placeholder="Project Title..." />
                   </div>
-                  {/* OPEN WRITER'S ROOM BUTTON (Only shown on Private Master) */}
-                  {!isWritersRoom && isRealUser && (
-                    <button onClick={openWritersRoom} className="hidden sm:flex items-center gap-2 px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-full text-[10px] font-black transition-colors shrink-0">
-                      <Users size={12}/> OPEN TO WRITER'S ROOM
-                    </button>
-                  )}
                 </div>
                 
                 {/* HIGH VISIBILITY METADATA BADGES */}
@@ -1772,8 +1659,6 @@ const App = () => {
                                 )}
                               </div>
                               
-                              {shot.lastEditedBy && isWritersRoom && <div className="mt-2 text-[9px] text-blue-400 italic">Last edit by: {shot.lastEditedBy}</div>}
-
                               <div className="flex flex-col gap-2 w-full mt-4">
                                 <div className="flex items-center bg-zinc-950/50 border border-zinc-800/50 rounded-xl px-3 py-3 md:py-2 w-full focus-within:border-orange-500/50 transition-colors">
                                   <Clapperboard size={12} className="text-orange-500 mr-2 shrink-0" />
