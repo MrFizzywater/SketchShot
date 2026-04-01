@@ -968,12 +968,24 @@ const App = () => {
       const typeList = SHOT_TYPES.join(', ');
       const cameraMoveList = CAMERA_MOVES.join(', ');
       
-      let taskInstruction = `Generate a JSON array containing exactly ${count} shot objects.`;
-      if (type === 'opening') taskInstruction = `Generate a JSON array containing exactly 1 Opening Image / Establishing Shot.`;
-      if (type === 'ending') taskInstruction = `Generate a JSON array containing exactly 1 Final Closing Shot / Outro.`;
+      let taskInstruction = `Generate a JSON array containing exactly ${count} shot objects continuing the narrative.`;
+      if (type === 'opening') {
+        taskInstruction = `Generate a JSON array containing exactly 1 Opening Image / Establishing Shot. CRITICAL: This MUST be a wide establishing shot, an atmospheric cutaway, or a macro detail shot that sets the location, mood, or context BEFORE the main character action begins. Do not jump straight into dialogue.`;
+      }
+      if (type === 'ending') {
+        taskInstruction = `Generate a JSON array containing exactly 1 Final Closing Shot / Outro.`;
+      }
 
       const systemPrompt = `Expert director. ${taskInstruction} YOU MUST RETURN A VALID JSON ARRAY []. Use these EXACT keys for each object: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "duration" (estimated seconds, number), "cameraMove" (Must be one of: ${cameraMoveList}), "shotCharacters" (array of strings), "sceneHeading" (Infer a logical master scene heading, e.g. INT. LIVING ROOM - DAY). CRITICAL: Treat every character as a distinctly separate individual. Keep descriptions punchy and direct. Max 1-2 sentences per field. DO NOT write full script pages.`;
-      const prompt = `PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nESCALATION: ${activeSketch?.escalation}\nENDING: ${activeSketch?.ending}`;
+      
+      let recentShotsContext = "";
+      if (activeShots.length > 0 && type !== 'opening') {
+        // Grab the last 6 shots so the AI knows exactly where we are in the scene geography
+        const recent = activeShots.slice(-6).map(s => `Shot ${s.number} (${s.sceneHeading}): [${s.type}] ${s.subject} - ${s.action}`).join('\n');
+        recentShotsContext = `\n\nCURRENT SEQUENCE SO FAR (Continue logically from the last shot):\n${recent}`;
+      }
+
+      const prompt = `PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nESCALATION: ${activeSketch?.escalation}\nENDING: ${activeSketch?.ending}${recentShotsContext}`;
       
       const newShotsData = await callGemini(prompt, systemPrompt, true);
       
