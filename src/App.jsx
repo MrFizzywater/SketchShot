@@ -6,7 +6,7 @@ import {
   X, Download, Upload, Save, Maximize2, Map, 
   ChevronUp, ChevronDown, Clock, ListVideo, Mic,
   UserPlus, ArrowUp, ArrowDown, Cloud, GitBranch, LogOut, Lock, Copy, Menu,
-  ScrollText, VenetianMask, Clapperboard, Key, EyeOff, User, Settings2, Users, Settings, Video, RefreshCcw, Undo, Scissors, CheckCircle2, Film
+  ScrollText, VenetianMask, Clapperboard, Key, EyeOff, User, Settings2, Users, Settings, Video, RefreshCcw, ArrowDownToLine, ArrowUpFromLine, Undo, Scissors, CheckCircle2, Film
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -128,11 +128,17 @@ const App = () => {
   const autosaveTimeout = useRef(null);
   const isDirty = useRef(false); 
   const [boardCols, setBoardCols] = useState(2);
+  const [printListMode, setPrintListMode] = useState('sequence'); 
+  const [bulkHeadingEdit, setBulkHeadingEdit] = useState({ old: null, value: '' });
 
   // --- DERIVED CONTEXT LOGIC ---
   const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
   const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
-  const currentDisplayList = boardSubTab === 'shoot-plan' && shootPlan.length > 0 ? shootPlan : activeShots;
+  
+  // Adjusted List rendering logic for the new toggle
+  let currentDisplayList = activeShots;
+  if (boardSubTab === 'shoot-plan' && shootPlan.length > 0) currentDisplayList = shootPlan;
+  if (boardSubTab === 'print-list' && printListMode === 'shoot-plan' && shootPlan.length > 0) currentDisplayList = shootPlan;
   
   const totalDurationSeconds = activeShots.reduce((acc, shot) => acc + (parseInt(shot.duration) || 0), 0);
   const activePropsList = Array.isArray(activeSketch?.props) ? activeSketch.props : (activeSketch?.props ? String(activeSketch.props).split(',').map(s => s.trim()).filter(s => s) : []);
@@ -243,6 +249,16 @@ const App = () => {
     updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s), false);
   };
 
+  const updateSceneHeadingBulk = (oldHeading, newHeading) => {
+    if (!newHeading.trim() || oldHeading === newHeading) return;
+    updateContextState(prev => prev.map(s => {
+      if (s.sketchId === activeSketchId && s.sceneHeading === oldHeading) {
+        return { ...s, sceneHeading: newHeading.toUpperCase() };
+      }
+      return s;
+    }), false);
+  };
+
   // --- NATIVE VOICE DICTATION ---
   const handleVoiceInput = (currentText, onResult, elementId) => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -303,9 +319,9 @@ const App = () => {
       const oldName = oldProfile.name;
       const newName = value;
       
+      // Update Shots
       updateContextState(prev => prev.map(shot => {
         if (shot.sketchId !== activeSketchId) return shot;
-        
         let changed = false;
         let newShot = { ...shot };
 
@@ -321,9 +337,24 @@ const App = () => {
             changed = true;
           }
         });
-
         return changed ? newShot : shot;
       }), false);
+
+      // Update Config & Script Text Fields
+      const regexGlobal = new RegExp(`\\b${oldName}\\b`, 'g');
+      let sketchChanged = false;
+      let updatedActiveSketch = { ...activeSketch };
+      
+      ['premise', 'hook', 'escalation', 'ending', 'script'].forEach(key => {
+        if (updatedActiveSketch[key] && typeof updatedActiveSketch[key] === 'string' && updatedActiveSketch[key].match(regexGlobal)) {
+          updatedActiveSketch[key] = updatedActiveSketch[key].replace(regexGlobal, newName);
+          sketchChanged = true;
+        }
+      });
+      
+      if (sketchChanged) {
+        updateContextState(prev => prev.map(s => s.id === activeSketchId ? { ...s, ...updatedActiveSketch } : s), true);
+      }
     }
   };
 
@@ -510,7 +541,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "7.0", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "7.1", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -521,7 +552,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "7.0", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "7.1", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -770,54 +801,6 @@ const App = () => {
     } finally { setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: false })); }
   };
 
-  const generateCharAvatar = async (charId) => {
-    const activeKey = userApiKey.trim();
-    if (!activeKey) return alert("API Key missing! Please enter your personal Gemini API key in the sidebar Settings panel.");
-    
-    setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: true }));
-    const char = activeProfiles.find(c => c.id === charId);
-    const promptText = `A close-up cinematic headshot photograph of a ${char.age} year old ${char.sex || 'person'} with ${getSkinText(char.melanin)} who is ${getGenderText(char.gender)}. Vibe/Archetype: ${char.archetype}. Details: ${char.desc}. Plain neutral background. Highly detailed, photorealistic.`;
-
-    const maxRetries = 6; let delay = 3000;
-    try {
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: '1:1' } })
-          });
-
-          if (response.status === 429) throw new Error("429");
-          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
-
-          const result = await response.json();
-          const rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
-          
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = 256; canvas.height = 256;
-            const ctx = canvas.getContext('2d'); 
-            const size = Math.min(img.width, img.height);
-            const x = (img.width - size) / 2;
-            const y = (img.height - size) / 2;
-            ctx.drawImage(img, x, y, size, size, 0, 0, 256, 256);
-            updateChar(charId, 'image', canvas.toDataURL('image/jpeg', 0.8));
-          };
-          img.src = rawImageUrl;
-          break; 
-        } catch (error) {
-          if (i === maxRetries - 1) {
-            if (error.message === "429") alert(`Union Break! The Image AI hit a rate limit.`); 
-            else alert(`Image Error: ${error.message}`); 
-            throw error; 
-          }
-          await new Promise(r => setTimeout(r, delay)); delay *= 1.5; 
-        }
-      }
-    } finally { setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: false })); }
-  };
-
   // --- SCRIPT BREAKER LOGIC ---
   const analyzeScriptMetadata = async () => {
     if (!rawImportScript.trim()) return;
@@ -887,7 +870,7 @@ const App = () => {
       const systemPrompt = `You are an expert 1st AD breaking down a script scene. 
       Task 1: Identify any NEW characters in this scene that are NOT in the existing characters list. 
       Task 2: Create a logical shot list for this scene. 
-      If the SCENE HEADING is missing or unclear, invent a logical standard scene heading (e.g., INT. LIVING ROOM - DAY) based on the scene text.
+      If the SCENE HEADING is missing or unclear, infer a logical standard scene heading (e.g., INT. LIVING ROOM - DAY) based on the scene text.
       Return a JSON object: 
       {
         "sceneHeading": "INT. LOCATION - DAY",
@@ -973,14 +956,21 @@ const App = () => {
     } catch(e) { console.error(e); } finally { setLoadingStates(prev => ({ ...prev, extractChars: false })); }
   };
 
-  const generateAISHots = async () => {
+  const generateAISHots = async (count, type) => {
     setLoadingStates(prev => ({ ...prev, genShots: true }));
     try {
       const typeList = SHOT_TYPES.join(', ');
       const cameraMoveList = CAMERA_MOVES.join(', ');
-      const systemPrompt = `Expert director. Generate JSON array of exactly 8 shots. Use these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "duration" (estimated seconds, number), "cameraMove" (Must be one of: ${cameraMoveList}), "shotCharacters" (array of strings). CRITICAL: Treat every character as a distinctly separate individual. Do not merge their actions or dialogue. Keep descriptions punchy and direct. Max 1-2 sentences per field. Dialogue should be a single line or short improv prompt. DO NOT write full script pages.`;
+      
+      let taskInstruction = `Generate exactly ${count} shots.`;
+      if (type === 'opening') taskInstruction = `Generate an Opening Image / Establishing Shot (exactly 1 shot).`;
+      if (type === 'ending') taskInstruction = `Generate a Final Closing Shot / Outro (exactly 1 shot).`;
+
+      const systemPrompt = `Expert director. ${taskInstruction} Use these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "duration" (estimated seconds, number), "cameraMove" (Must be one of: ${cameraMoveList}), "shotCharacters" (array of strings), "sceneHeading" (Infer a logical master scene heading, e.g. INT. LIVING ROOM - DAY). CRITICAL: Treat every character as a distinctly separate individual. Keep descriptions punchy and direct. Max 1-2 sentences per field. DO NOT write full script pages.`;
       const prompt = `PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nESCALATION: ${activeSketch?.escalation}\nENDING: ${activeSketch?.ending}`;
+      
       const newShotsData = await callGemini(prompt, systemPrompt, true);
+      
       if (newShotsData) {
         updateContextState(prev => {
           const currentSketchShots = prev.filter(s => s.sketchId === activeSketchId);
@@ -994,7 +984,7 @@ const App = () => {
             number: maxNum + idx + 1, 
             fx: false, 
             image: null, 
-            sceneHeading: lastHeading, 
+            sceneHeading: s.sceneHeading || lastHeading, 
             cameraMove: CAMERA_MOVES.includes(s.cameraMove) ? s.cameraMove : 'Locked Off', 
             duration: parseInt(s.duration) || 5,
             shotCharacters: Array.isArray(s.shotCharacters) ? s.shotCharacters : [] 
@@ -1003,39 +993,6 @@ const App = () => {
         }, false);
       }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, genShots: false })); }
-  };
-
-  const generateSingleAIShot = async () => {
-    setLoadingStates(prev => ({ ...prev, singleAIShot: true }));
-    try {
-      const typeList = SHOT_TYPES.join(', ');
-      const cameraMoveList = CAMERA_MOVES.join(', ');
-      const systemPrompt = `Expert director. Generate exactly ONE new shot to continue the sequence. Return a SINGLE JSON OBJECT with these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "duration" (estimated seconds, number), "cameraMove" (Must be one of: ${cameraMoveList}), "shotCharacters" (array of strings). CRITICAL: Treat every character as a distinctly separate individual. Do not merge their actions or dialogue. Keep all text punchy, direct, and brief.`;
-      const recentShots = activeShots.slice(-3).map(s => `Scene: ${s.sceneHeading}, Shot ${s.number}: [${s.type}] ${s.subject} - ${s.action}`).join('\n');
-      const prompt = `PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nCHARACTERS: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nRECENT SHOTS:\n${recentShots}\n\nCreate the NEXT logical shot to build the scene.`;
-      const newShotData = await callGemini(prompt, systemPrompt, true);
-      if (newShotData) {
-        updateContextState(prev => {
-          const currentSketchShots = prev.filter(s => s.sketchId === activeSketchId);
-          const maxNum = currentSketchShots.length > 0 ? Math.max(...currentSketchShots.map(s => s.number)) : 0;
-          const lastHeading = currentSketchShots.length > 0 ? currentSketchShots[currentSketchShots.length - 1].sceneHeading : 'INT. LOCATION - DAY';
-          
-          const newShot = {
-            ...newShotData, 
-            id: `ai-single-${Date.now()}`, 
-            sketchId: activeSketchId, 
-            number: maxNum + 1,
-            fx: false, 
-            image: null, 
-            sceneHeading: lastHeading, 
-            cameraMove: CAMERA_MOVES.includes(newShotData.cameraMove) ? newShotData.cameraMove : 'Locked Off',
-            duration: parseInt(newShotData.duration) || 5,
-            shotCharacters: Array.isArray(newShotData.shotCharacters) ? newShotData.shotCharacters : []
-          };
-          return [...prev, newShot];
-        }, false);
-      }
-    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, singleAIShot: false })); }
   };
 
   const optimizeShootOrder = async () => {
@@ -1094,8 +1051,10 @@ const App = () => {
       const existingText = activeSketch[beatType] || '';
       let taskDesc = `Task: Write a new ${beatType.toUpperCase()} for the project.`;
       
-      if (existingText) {
-         taskDesc = `Task: Enhance the existing ${beatType.toUpperCase()}: "${existingText}". CRITICAL: Keep the core idea EXACTLY the same, but format it into a professional, punchy logline. Do NOT invent unnecessary new subplots or characters.`;
+      if (existingText && beatType === 'premise') {
+         taskDesc = `Task: Enhance the existing PREMISE: "${existingText}". CRITICAL: KEEP THE ORIGINAL IDEA STRICTLY INTACT. Do NOT invent unnecessary new subplots, characters, or heavy details. Just tighten it into a punchy, professional screenplay logline.`;
+      } else if (existingText) {
+         taskDesc = `Task: Enhance the existing ${beatType.toUpperCase()}: "${existingText}".`;
       }
       
       const prompt = `Title: ${activeSketch?.title}\nCharacter Profiles: ${richCharactersContext}\n${beatType !== 'premise' ? `Current Premise: ${activeSketch?.premise}\n` : ''}${taskDesc}`;
@@ -1493,7 +1452,7 @@ const App = () => {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-800 pb-4">
                   <div>
                     <h2 className="text-xl md:text-2xl font-black uppercase tracking-tighter text-green-500 flex items-center gap-2"><Users size={24} /> Character Bible</h2>
-                    <p className="text-[10px] text-zinc-400 mt-1 uppercase tracking-widest">Changing a name here will auto-update the entire shot list.</p>
+                    <p className="text-[10px] text-zinc-400 mt-1 uppercase tracking-widest">Changing a name here will auto-update the entire shot list and script.</p>
                   </div>
                   <div className="flex gap-2 w-full sm:w-auto">
                     {aiEnabled && (
@@ -1708,16 +1667,23 @@ const App = () => {
                     <button onClick={() => setBoardSubTab('print-list')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 ${boardSubTab === 'print-list' ? 'bg-zinc-700 text-white shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><ListVideo size={12}/> LIST</button>
                   </div>
                   
-                  <div className="flex gap-2 w-full sm:w-auto">
+                  <div className="flex gap-2 w-full sm:w-auto overflow-x-auto">
                     {boardSubTab === 'grid' && activeShots.length > 0 && (
-                      <button onClick={clearAllShots} className="flex-1 sm:flex-none flex items-center justify-center gap-1 px-4 py-2.5 bg-red-900/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-900/50 rounded-full text-[10px] font-black transition-colors">
+                      <button onClick={clearAllShots} className="flex-1 sm:flex-none flex items-center justify-center gap-1 px-4 py-2 bg-red-900/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-900/50 rounded-full text-[10px] font-black transition-colors">
                         <Trash2 size={14}/> CLEAR BOARD
                       </button>
                     )}
                     {boardSubTab === 'grid' && aiEnabled && (
-                      <button onClick={generateAISHots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none flex justify-center flex items-center gap-2 px-6 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg shadow-purple-900/20 whitespace-nowrap">
-                        {loadingStates.genShots ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <Sparkles size={14} />)} BUILD 8-SHOT SEQUENCE
-                      </button>
+                      <div className="flex bg-purple-600/20 border border-purple-500/30 rounded-full overflow-hidden shadow-lg shadow-purple-900/20">
+                        <div className="flex items-center px-3 border-r border-purple-500/30 text-purple-400">
+                          {loadingStates.genShots ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)}
+                        </div>
+                        <button onClick={() => generateAISHots(1, 'opening')} disabled={!isRealUser || isAIBusy} className="px-3 py-2 text-[9px] font-black hover:bg-purple-600 hover:text-white text-purple-300 transition-colors border-r border-purple-500/30 whitespace-nowrap disabled:opacity-50">OPENING</button>
+                        <button onClick={() => generateAISHots(4, 'sequence')} disabled={!isRealUser || isAIBusy} className="px-3 py-2 text-[10px] font-black hover:bg-purple-600 hover:text-white text-purple-300 transition-colors border-r border-purple-500/30 disabled:opacity-50">+4</button>
+                        <button onClick={() => generateAISHots(6, 'sequence')} disabled={!isRealUser || isAIBusy} className="px-3 py-2 text-[10px] font-black hover:bg-purple-600 hover:text-white text-purple-300 transition-colors border-r border-purple-500/30 disabled:opacity-50">+6</button>
+                        <button onClick={() => generateAISHots(8, 'sequence')} disabled={!isRealUser || isAIBusy} className="px-3 py-2 text-[10px] font-black hover:bg-purple-600 hover:text-white text-purple-300 transition-colors border-r border-purple-500/30 disabled:opacity-50">+8</button>
+                        <button onClick={() => generateAISHots(1, 'ending')} disabled={!isRealUser || isAIBusy} className="px-3 py-2 text-[9px] font-black hover:bg-purple-600 hover:text-white text-purple-300 transition-colors whitespace-nowrap disabled:opacity-50">ENDING</button>
+                      </div>
                     )}
                     {boardSubTab === 'shoot-plan' && (
                       <>
@@ -1745,14 +1711,27 @@ const App = () => {
                       const isPersonalKeyActive = userApiKey.trim().length > 0;
                       // Identify if this shot starts a new scene visually
                       const isNewScene = index === 0 || shot.sceneHeading !== activeShots[index - 1].sceneHeading;
+                      const isEditingThisHeading = bulkHeadingEdit.old === shot.sceneHeading;
                       
                       return (
                       <React.Fragment key={shot.id}>
                         {isNewScene && (
                            <div className="flex items-center gap-4 py-4 mt-8">
                              <div className="h-px bg-zinc-800 flex-1"></div>
-                             <div className="text-sm font-black uppercase tracking-widest text-orange-500 bg-orange-500/10 px-4 py-2 rounded-full border border-orange-500/20 flex items-center gap-2">
-                                <Clapperboard size={16}/> {shot.sceneHeading}
+                             <div className="text-sm font-black uppercase tracking-widest text-orange-500 bg-orange-500/10 px-4 py-2 rounded-full border border-orange-500/20 flex items-center gap-2 group/heading">
+                                <Clapperboard size={16}/> 
+                                <input 
+                                  value={isEditingThisHeading ? bulkHeadingEdit.value : shot.sceneHeading}
+                                  onChange={(e) => setBulkHeadingEdit({ old: shot.sceneHeading, value: e.target.value.toUpperCase() })}
+                                  onBlur={() => {
+                                    if (bulkHeadingEdit.old) {
+                                      updateSceneHeadingBulk(bulkHeadingEdit.old, bulkHeadingEdit.value);
+                                      setBulkHeadingEdit({ old: null, value: '' });
+                                    }
+                                  }}
+                                  className="bg-transparent border-none outline-none text-orange-500 placeholder-orange-500/50 min-w-[150px] sm:min-w-[250px]"
+                                  title="Edit to rename all shots in this scene"
+                                />
                              </div>
                              <div className="h-px bg-zinc-800 flex-1"></div>
                            </div>
@@ -1998,18 +1977,27 @@ const App = () => {
                 
                 {/* PRINT VIEWS (Full screen takeover rendered via CSS) */}
                 {(boardSubTab === 'print-boards' || boardSubTab === 'print-list') && (
-                  <div className="print:absolute print:inset-0 print:bg-white print:text-black print:z-[999] min-h-screen bg-white text-black p-6 md:p-12 font-serif rounded-[2rem] shadow-2xl">
+                  <div className="print:absolute print:inset-0 print:bg-white print:text-black print:z-[999] min-h-screen bg-white text-black p-6 md:p-12 font-serif rounded-[2rem] shadow-2xl overflow-y-auto">
                     <div className="flex items-center gap-2 print:hidden mb-12 border-b-2 border-black pb-6 justify-between">
                       <button onClick={() => setBoardSubTab('grid')} className="flex items-center gap-2 px-4 py-2 bg-black hover:bg-zinc-800 transition-colors text-white rounded-full text-xs font-bold shadow-lg">
                         <ArrowLeft size={14} /> EXIT PRINT PREVIEW
                       </button>
-                      <div className="flex gap-4">
+                      <div className="flex gap-4 items-center">
                         {boardSubTab === 'print-boards' && (
                           <div className="flex bg-zinc-200 rounded-full p-1 shadow-inner items-center">
                             <span className="text-[10px] font-black uppercase text-zinc-500 px-3 select-none">Columns:</span>
                             {[1, 2, 3, 4].map(num => (
                               <button key={num} onClick={() => setBoardCols(num)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${boardCols === num ? 'bg-black text-white shadow' : 'text-zinc-600 hover:text-black'}`}>{num}</button>
                             ))}
+                          </div>
+                        )}
+                        {boardSubTab === 'print-list' && (
+                          <div className="flex bg-zinc-200 rounded-full p-1 shadow-inner items-center">
+                            <span className="text-[10px] font-black uppercase text-zinc-500 px-3 select-none">Sort:</span>
+                            <button onClick={() => setPrintListMode('sequence')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${printListMode === 'sequence' ? 'bg-black text-white shadow' : 'text-zinc-600 hover:text-black'}`}>IN SEQUENCE</button>
+                            <button onClick={() => { if(shootPlan.length > 0) setPrintListMode('shoot-plan'); else optimizeShootOrder(); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${printListMode === 'shoot-plan' ? 'bg-black text-white shadow' : 'text-zinc-600 hover:text-black'}`}>
+                               {loadingStates.optimizing ? <Loader2 size={12} className="animate-spin inline" /> : '1ST AD PLAN'}
+                            </button>
                           </div>
                         )}
                         <button onClick={() => window.print()} className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-500 transition-colors text-white rounded-full text-xs font-bold shadow-lg">
@@ -2043,7 +2031,7 @@ const App = () => {
                                     </tr>
                                   )}
                                   <tr className="border-b border-zinc-200 align-top break-inside-avoid">
-                                    <td className="py-4 font-bold">{idx + 1}</td>
+                                    <td className="py-4 font-bold">{printListMode === 'shoot-plan' ? shot.shootOrderNumber : idx + 1}</td>
                                     <td className="py-4 font-bold text-[10px] uppercase">
                                       {shot.type}
                                       {shot.cameraMove && shot.cameraMove !== 'Locked Off' && <span className="block text-[8px] text-blue-600 mt-1">{shot.cameraMove}</span>}
