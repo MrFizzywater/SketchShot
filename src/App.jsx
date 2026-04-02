@@ -84,6 +84,44 @@ const formatTime = (secs) => {
   );
 };
 
+// Helper function to safely merge AI-generated characters into the existing cast list
+const mergeCharacters = (existingProfiles, newAICharacters) => {
+  if (!newAICharacters || !Array.isArray(newAICharacters)) return existingProfiles;
+  
+  let updatedProfiles = [...existingProfiles];
+  
+  newAICharacters.forEach(aiChar => {
+    if (!aiChar.name) return;
+    const existingIdx = updatedProfiles.findIndex(p => p.name.toLowerCase() === aiChar.name.toLowerCase());
+    
+    if (existingIdx >= 0) {
+      // Update existing character
+      updatedProfiles[existingIdx] = {
+        ...updatedProfiles[existingIdx],
+        sex: aiChar.sex || updatedProfiles[existingIdx].sex,
+        age: aiChar.age || updatedProfiles[existingIdx].age,
+        archetype: COMEDY_ARCHETYPES.includes(aiChar.archetype) ? aiChar.archetype : updatedProfiles[existingIdx].archetype,
+        desc: aiChar.desc || updatedProfiles[existingIdx].desc
+      };
+    } else {
+      // Add new character
+      updatedProfiles.push({
+        id: Date.now().toString() + Math.random().toString(36).substring(7),
+        name: aiChar.name || 'Unknown', 
+        sex: aiChar.sex || 'Male', 
+        age: aiChar.age || 30, 
+        gender: aiChar.gender || 50, 
+        melanin: aiChar.melanin || 50,
+        archetype: COMEDY_ARCHETYPES.includes(aiChar.archetype) ? aiChar.archetype : 'Other', 
+        desc: aiChar.desc || '', 
+        image: null
+      });
+    }
+  });
+  
+  return updatedProfiles;
+};
+
 const App = () => {
   const [user, setUser] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
@@ -98,7 +136,7 @@ const App = () => {
     characterProfiles: [
       { id: 'c1', name: 'The Director', sex: 'Female', age: 35, gender: 50, melanin: 50, archetype: 'The Neurotic', desc: 'Staring at a blank screen.', image: null },
       { id: 'c2', name: 'The AI', sex: 'Male', age: 1, gender: 50, melanin: 50, archetype: 'The Wildcard', desc: 'A chaotic but helpful partner.', image: null },
-    ], hook: 'The Director is staring at a blank page.', escalation: 'They open SketchBeans.', ending: 'They get some sleep.', script: '', punchUpNotes: ''
+    ], hook: 'The Director is staring at a blank page.', escalation: 'They open SketchBeans.', ending: 'They get some sleep.', script: '', punchUpNotes: []
   }]);
   const [shots, setShots] = useState([
     { id: 's1', sketchId: '1', number: 1, type: 'Wide', cameraMove: 'Locked Off', duration: 8, subject: 'THE DASHBOARD', action: 'Welcome to SketchBeans! The key details of your sketch live right up there under the title. \n\nClick the "SCENE CONFIG" tab to change your location, comedic tone, and visual style.', notes: 'Keep the premise simple. The AI uses it to build everything else.', dialogue: '', fx: false, image: null, sceneHeading: 'INT. THE EDIT BAY - NIGHT', shotCharacters: [] }
@@ -139,6 +177,9 @@ const App = () => {
   const [printListMode, setPrintListMode] = useState('sequence'); 
   const [bulkHeadingEdit, setBulkHeadingEdit] = useState({ old: null, value: '' });
   const [bulkCharEdit, setBulkCharEdit] = useState({ id: null, oldName: '', value: '' }); 
+  
+  // New State for Punch Up Note Checkboxes
+  const [selectedPunchUps, setSelectedPunchUps] = useState([]);
 
   // --- DERIVED CONTEXT LOGIC ---
   const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
@@ -167,6 +208,7 @@ const App = () => {
     if (activeSketchId) localStorage.setItem('sketchbeans_active_sketch', activeSketchId);
     setRawImportScript('');
     setScriptChunks([]);
+    setSelectedPunchUps([]); // Reset checkboxes when changing sketches
   }, [activeSketchId]);
 
   useEffect(() => {
@@ -459,7 +501,7 @@ const App = () => {
     const updatedSketches = sketches.filter(s => s.id !== id);
     if (updatedSketches.length === 0) {
       const newId = Date.now().toString();
-      updatedSketches.push({ id: newId, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: '' });
+      updatedSketches.push({ id: newId, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: [] });
       setActiveSketchId(newId);
     } else if (activeSketchId === id) setActiveSketchId(updatedSketches[0].id);
     
@@ -480,7 +522,7 @@ const App = () => {
       escalation: '',
       ending: '',
       script: '',
-      punchUpNotes: ''
+      punchUpNotes: []
     };
     
     setSketches(prev => [...prev, clonedSketch]);
@@ -588,7 +630,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "8.0", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "8.1", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -599,7 +641,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "8.0", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "8.1", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -983,14 +1025,8 @@ const App = () => {
           updateSketch(activeSketchId, 'props', uniqueProps);
         }
         if (result.newCharacters && Array.isArray(result.newCharacters)) {
-           const newProfiles = result.newCharacters.map(c => ({
-             id: Date.now().toString() + Math.random().toString(36).substring(7),
-             name: c.name || 'Unknown', sex: c.sex || 'Male', age: c.age || 30, gender: c.gender || 50, melanin: c.melanin || 50,
-             archetype: COMEDY_ARCHETYPES.includes(c.archetype) ? c.archetype : 'Other', desc: c.desc || '', image: null
-           }));
-           if (newProfiles.length > 0) {
-             updateContextState(prev => prev.map(s => s.id === activeSketchId ? { ...s, characterProfiles: [...(s.characterProfiles || []), ...newProfiles] } : s), true);
-           }
+           const mergedProfiles = mergeCharacters(activeProfiles, result.newCharacters);
+           updateSketch(activeSketchId, 'characterProfiles', mergedProfiles);
         }
         alert("Script Metadata & Characters Analyzed and Applied to Config!");
       }
@@ -1041,14 +1077,8 @@ const App = () => {
       
       if (result) {
         if (result.newCharacters && Array.isArray(result.newCharacters)) {
-           const newProfiles = result.newCharacters.map(c => ({
-             id: Date.now().toString() + Math.random().toString(36).substring(7),
-             name: c.name || 'Unknown', sex: c.sex || 'Male', age: c.age || 30, gender: c.gender || 50, melanin: c.melanin || 50,
-             archetype: COMEDY_ARCHETYPES.includes(c.archetype) ? c.archetype : 'Other', desc: c.desc || '', image: null
-           }));
-           if (newProfiles.length > 0) {
-             updateContextState(prev => prev.map(s => s.id === activeSketchId ? { ...s, characterProfiles: [...(s.characterProfiles || []), ...newProfiles] } : s), true);
-           }
+           const mergedProfiles = mergeCharacters(activeProfiles, result.newCharacters);
+           updateContextState(prev => prev.map(s => s.id === activeSketchId ? { ...s, characterProfiles: mergedProfiles } : s), true);
         }
         
         if (result.shots && Array.isArray(result.shots)) {
@@ -1102,12 +1132,8 @@ const App = () => {
       const extracted = await callGemini(prompt, systemPrompt, true);
       
       if (extracted && Array.isArray(extracted) && extracted.length > 0) {
-         const newProfiles = extracted.map(c => ({
-           id: Date.now().toString() + Math.random().toString(36).substring(7),
-           name: c.name || 'Unknown', sex: c.sex || 'Male', age: c.age || 30, gender: c.gender || 50, melanin: c.melanin || 50,
-           archetype: COMEDY_ARCHETYPES.includes(c.archetype) ? c.archetype : 'Other', desc: c.desc || '', image: null
-         }));
-         updateSketch(activeSketchId, 'characterProfiles', [...activeProfiles, ...newProfiles]);
+         const mergedProfiles = mergeCharacters(activeProfiles, extracted);
+         updateSketch(activeSketchId, 'characterProfiles', mergedProfiles);
       } else alert("No clear characters found to extract.");
     } catch(e) { console.error(e); } finally { setLoadingStates(prev => ({ ...prev, extractChars: false })); }
   };
@@ -1168,39 +1194,6 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, genShots: false })); }
   };
 
-  const generateSingleAIShot = async () => {
-    setLoadingStates(prev => ({ ...prev, singleAIShot: true }));
-    try {
-      const typeList = SHOT_TYPES.join(', ');
-      const cameraMoveList = CAMERA_MOVES.join(', ');
-      const systemPrompt = `Expert director. Generate exactly ONE new shot to continue the sequence. Return a SINGLE JSON OBJECT with these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "duration" (estimated seconds, number), "cameraMove" (Must be one of: ${cameraMoveList}), "shotCharacters" (array of strings). CRITICAL: Treat every character as a distinctly separate individual. Do not merge their actions or dialogue. Keep all text punchy, direct, and brief.`;
-      const recentShots = activeShots.slice(-3).map(s => `Scene: ${s.sceneHeading}, Shot ${s.number}: [${s.type}] ${s.subject} - ${s.action}`).join('\n');
-      const prompt = `SERIES ENGINE: ${activeSketch?.seriesPremise}\nEPISODE PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nCHARACTERS: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nRECENT SHOTS:\n${recentShots}\n\nCreate the NEXT logical shot to build the scene.`;
-      const newShotData = await callGemini(prompt, systemPrompt, true);
-      if (newShotData) {
-        updateContextState(prev => {
-          const currentSketchShots = prev.filter(s => s.sketchId === activeSketchId);
-          const maxNum = currentSketchShots.length > 0 ? Math.max(...currentSketchShots.map(s => s.number)) : 0;
-          const lastHeading = currentSketchShots.length > 0 ? currentSketchShots[currentSketchShots.length - 1].sceneHeading : 'INT. LOCATION - DAY';
-          
-          const newShot = {
-            ...newShotData, 
-            id: `ai-single-${Date.now()}`, 
-            sketchId: activeSketchId, 
-            number: maxNum + 1,
-            fx: false, 
-            image: null, 
-            sceneHeading: newShotData.sceneHeading || lastHeading, 
-            cameraMove: CAMERA_MOVES.includes(newShotData.cameraMove) ? newShotData.cameraMove : 'Locked Off',
-            duration: parseInt(newShotData.duration) || 5,
-            shotCharacters: Array.isArray(newShotData.shotCharacters) ? newShotData.shotCharacters : []
-          };
-          return [...prev, newShot];
-        }, false);
-      }
-    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, singleAIShot: false })); }
-  };
-
   const optimizeShootOrder = async (isPrintList = false) => {
     const printTrigger = typeof isPrintList === 'boolean' ? isPrintList : false;
     setLoadingStates(prev => ({ ...prev, optimizing: true }));
@@ -1257,13 +1250,38 @@ const App = () => {
     if (!activeSketch?.script || activeSketch.script.trim().length === 0) return alert("Write or generate a script first to get punch-up notes!");
     setLoadingStates(prev => ({ ...prev, punchUp: true }));
     try {
-      const systemPrompt = `You are a seasoned showrunner. Read the following script and provide 3-5 specific, highly actionable 'punch-up' notes. Your goal is to elevate the ${activeSketch?.tone} tone. Suggest alt-lines for dialogue, ways to escalate the physical action, or point out pacing issues. Keep it concise, punchy, and formatted as a clear bulleted list. Do not rewrite the entire script for them.`;
+      const systemPrompt = `You are a seasoned showrunner. Read the following script and provide 3-5 specific, highly actionable 'punch-up' notes. Your goal is to elevate the ${activeSketch?.tone} tone. Suggest alt-lines for dialogue, ways to escalate the physical action, or point out pacing issues. Keep it concise, punchy, and actionable. YOU MUST RETURN EXACTLY A JSON ARRAY OF STRINGS. Example: ["Change Bob's line to be more deadpan", "Add a physical gag with the coffee cup dropping"]`;
       const prompt = `Series Engine: ${activeSketch?.seriesPremise}\nEpisode Premise: ${activeSketch?.premise}\n\nCURRENT SCRIPT DRAFT:\n${activeSketch.script}`;
-      const feedback = await callGemini(prompt, systemPrompt, false);
-      if (feedback) {
+      const feedback = await callGemini(prompt, systemPrompt, true);
+      
+      if (feedback && Array.isArray(feedback)) {
         updateSketch(activeSketchId, 'punchUpNotes', feedback);
+        setSelectedPunchUps([]); // Reset selections on new generation
       }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, punchUp: false })); }
+  };
+
+  const implementPunchUps = async () => {
+    if (selectedPunchUps.length === 0) return;
+    setLoadingStates(prev => ({ ...prev, implementNotes: true }));
+    
+    // Safety check just in case legacy string data is in punchUpNotes
+    const safeNotesArray = Array.isArray(activeSketch.punchUpNotes) ? activeSketch.punchUpNotes : [];
+    const notesToApply = selectedPunchUps.map(idx => safeNotesArray[idx]);
+
+    try {
+      const systemPrompt = `You are an expert script doctor. Rewrite the provided script to implement ONLY the following showrunner notes:\n${notesToApply.map(n => `- ${n}`).join('\n')}\n\nMaintain the exact same formatting (PLAIN TEXT, standard screenplay format, ALL CAPS for scene headings and characters). ONLY change what is necessary to accomplish these specific notes. Return the full rewritten script.`;
+      const prompt = `CURRENT SCRIPT:\n${activeSketch.script}`;
+      const newScript = await callGemini(prompt, systemPrompt, false);
+      
+      if (newScript) {
+        updateSketch(activeSketchId, 'script', newScript.trim());
+        // Remove the implemented notes from the list
+        const remainingNotes = safeNotesArray.filter((_, idx) => !selectedPunchUps.includes(idx));
+        updateSketch(activeSketchId, 'punchUpNotes', remainingNotes);
+        setSelectedPunchUps([]);
+      }
+    } catch(e) { console.error(e); } finally { setLoadingStates(prev => ({ ...prev, implementNotes: false })); }
   };
 
   const generateTextAssist = async (shotId, field, rolePrompt, contextPrompt) => {
@@ -1432,7 +1450,7 @@ const App = () => {
               </div>
             </div>
           ))}
-          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW PROJECT</button>
+          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: [] }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW PROJECT</button>
         </nav>
 
         {/* CLOUD SYNC & BYOK PANEL */}
@@ -1540,14 +1558,14 @@ const App = () => {
                 <button onClick={() => setViewMode('scene')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'scene' ? 'bg-orange-500 text-white shadow-lg shadow-orange-900/20' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}>
                   <Settings2 size={14}/> CONFIG
                 </button>
+                <button onClick={() => setViewMode('script')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'script' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}>
+                  <ScrollText size={14}/> SCRIPT
+                </button>
                 <button onClick={() => setViewMode('characters')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'characters' ? 'bg-green-600 text-white shadow-lg shadow-green-900/20' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}>
                   <Users size={14}/> CHARACTER BIBLE
                 </button>
                 <button onClick={() => setViewMode('storyboard')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'storyboard' ? 'bg-zinc-100 text-zinc-950 shadow-lg' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}>
                   <Layout size={14}/> STORYBOARD
-                </button>
-                <button onClick={() => setViewMode('script')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'script' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}>
-                  <ScrollText size={14}/> SCRIPT
                 </button>
               </div>
 
@@ -1704,6 +1722,152 @@ const App = () => {
               </div>
             )}
 
+            {/* --- TAB: SCRIPT --- */}
+            {viewMode === 'script' && (
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 space-y-6">
+                
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-800 pb-4">
+                  <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800">
+                    <button onClick={() => setScriptSubTab('editor')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors ${scriptSubTab === 'editor' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-500 hover:text-zinc-300'}`}>MANUAL SCRIPT</button>
+                    {aiEnabled && (
+                      <button onClick={() => setScriptSubTab('breaker')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors flex items-center gap-1.5 ${scriptSubTab === 'breaker' ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' : 'text-zinc-500 hover:text-zinc-300'}`}><Scissors size={12}/> AI SCRIPT BREAKER</button>
+                    )}
+                  </div>
+                  
+                  {scriptSubTab === 'editor' && (
+                    <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
+                      {aiEnabled && (
+                        <>
+                          <button onClick={draftScriptFromConfig} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-blue-900/20 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-900/50 disabled:opacity-50 rounded-full text-[10px] font-black transition-colors whitespace-nowrap">
+                            {loadingStates.scriptDraft ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)} DRAFT FROM CONFIG
+                          </button>
+                          <button onClick={generateScriptFromShots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg shadow-blue-900/20 whitespace-nowrap">
+                            {loadingStates.scriptGen ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Layout size={12} />)} GEN FROM BOARD
+                          </button>
+                        </>
+                      )}
+                      <button onClick={downloadScript} disabled={!activeSketch?.script} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-zinc-800 text-blue-400 hover:bg-zinc-700 disabled:opacity-50 rounded-full text-[10px] font-black transition-all border border-zinc-700"><Download size={12} /> SAVE PDF</button>
+                    </div>
+                  )}
+                </div>
+
+                {scriptSubTab === 'editor' && (
+                  <div className="space-y-4">
+                    <div className="bg-zinc-900/40 border border-zinc-800 rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 relative shadow-xl">
+                      {aiEnabled && (
+                        <button onClick={getPunchUpNotes} disabled={!isRealUser || isAIBusy || !activeSketch?.script} className="absolute top-4 right-4 md:top-6 md:right-6 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-purple-400 disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg border border-zinc-700 flex items-center gap-2 transition-colors z-10">
+                          {loadingStates.punchUp ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} PUNCH UP NOTES
+                        </button>
+                      )}
+                      <textarea value={activeSketch?.script || ''} onChange={(e) => updateSketch(activeSketchId, 'script', e.target.value)} className="w-full bg-zinc-950/80 rounded-2xl p-4 md:p-8 text-xs md:text-sm font-mono text-zinc-300 min-h-[60vh] focus:outline-none border border-zinc-800/50 resize-y leading-relaxed whitespace-pre-wrap shadow-inner pt-12 md:pt-8" placeholder="Generate a script from your storyboard, draft from your config, or type manually..." />
+                    </div>
+
+                    {/* SHOWRUNNER NOTES PANEL (CHECKBOX UI) */}
+                    {Array.isArray(activeSketch?.punchUpNotes) && activeSketch.punchUpNotes.length > 0 && (
+                      <div className="bg-purple-900/10 border border-purple-500/30 rounded-[2rem] p-6 md:p-8 relative shadow-lg animate-in slide-in-from-top-4 mt-6">
+                        <button onClick={() => { updateSketch(activeSketchId, 'punchUpNotes', []); setSelectedPunchUps([]); }} className="absolute top-4 right-4 p-2 bg-zinc-950/80 hover:bg-zinc-800 rounded-full text-zinc-500 hover:text-white transition-colors border border-zinc-800"><X size={14}/></button>
+                        <h3 className="text-xs font-black text-purple-400 uppercase tracking-widest flex items-center gap-2 mb-4"><Sparkles size={14}/> Showrunner Notes</h3>
+                        
+                        <div className="space-y-3 mb-6">
+                          {activeSketch.punchUpNotes.map((note, idx) => {
+                            const isSelected = selectedPunchUps.includes(idx);
+                            return (
+                              <label key={idx} className="flex items-start gap-3 cursor-pointer group">
+                                <div className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-purple-600 border-purple-600 text-white' : 'bg-zinc-950 border-purple-500/50 text-transparent group-hover:border-purple-400'}`}>
+                                  <CheckCircle2 size={14} />
+                                </div>
+                                <span className={`text-sm leading-relaxed transition-colors ${isSelected ? 'text-purple-200' : 'text-purple-300/70'}`}>{note}</span>
+                                <input type="checkbox" className="hidden" checked={isSelected} onChange={() => {
+                                  setSelectedPunchUps(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]);
+                                }}/>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        
+                        {selectedPunchUps.length > 0 && (
+                          <div className="flex justify-end">
+                            <button onClick={implementPunchUps} disabled={loadingStates.implementNotes} className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-full text-[10px] uppercase tracking-widest font-black transition-colors shadow-lg shadow-purple-900/20 flex items-center gap-2">
+                              {loadingStates.implementNotes ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} IMPLEMENT {selectedPunchUps.length} NOTE{selectedPunchUps.length > 1 ? 'S' : ''}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {scriptSubTab === 'breaker' && aiEnabled && (
+                  <div className="space-y-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div>
+                        <h2 className="text-xl md:text-2xl font-black uppercase tracking-tighter text-purple-500 flex items-center gap-2"><Scissors size={24} /> The Script Breaker</h2>
+                        <p className="text-[10px] text-zinc-400 mt-1 uppercase tracking-widest">Paste a screenplay. Let the AI digest it and build your board.</p>
+                      </div>
+                      {scriptChunks.length > 0 && (
+                        <button onClick={() => { setScriptChunks([]); setRawImportScript(''); }} className="px-4 py-2 bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 rounded-full text-[10px] font-black transition-colors">START OVER</button>
+                      )}
+                    </div>
+
+                    {scriptChunks.length === 0 ? (
+                      <div className="bg-zinc-900/40 border border-zinc-800 rounded-[2rem] p-6 md:p-8 shadow-inner">
+                        <textarea 
+                          value={rawImportScript} 
+                          onChange={(e) => setRawImportScript(e.target.value)} 
+                          placeholder="Paste your script text here... It's best if scenes start with standard headings like INT. LOCATION - DAY, but the AI will try to infer them if missing." 
+                          className="w-full bg-zinc-950/80 rounded-2xl p-4 md:p-6 text-sm font-mono text-zinc-300 min-h-[40vh] focus:outline-none border border-zinc-800/50 resize-y whitespace-pre-wrap"
+                        />
+                        <div className="mt-4 flex flex-col lg:flex-row justify-between gap-4">
+                          <button onClick={() => setRawImportScript(activeSketch?.script || '')} disabled={!activeSketch?.script} className="w-full lg:w-auto px-6 py-3 bg-zinc-800/50 hover:bg-zinc-700 disabled:opacity-50 text-blue-400 font-black text-[10px] rounded-full tracking-widest transition-all flex items-center justify-center gap-2 border border-zinc-800">
+                            <ScrollText size={14}/> PULL FROM SCRIPT EDITOR
+                          </button>
+                          <div className="flex flex-col sm:flex-row justify-end gap-3 w-full lg:w-auto">
+                            <button onClick={analyzeScriptMetadata} disabled={!rawImportScript.trim() || !isRealUser || isAIBusy} className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-purple-400 font-black text-[10px] rounded-full tracking-widest transition-all flex items-center justify-center gap-2">
+                              {loadingStates.analyzeScript ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} 1. ANALYZE METADATA & CAST
+                            </button>
+                            <button onClick={parseScriptIntoChunks} disabled={!rawImportScript.trim()} className="px-6 py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-black text-xs rounded-full tracking-widest shadow-lg shadow-purple-900/20 transition-all flex items-center justify-center gap-2">
+                              <Scissors size={14}/> 2. SLICE INTO SCENES
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="bg-purple-500/10 border border-purple-500/30 rounded-2xl p-4 flex items-center justify-between text-purple-400">
+                          <span className="text-xs font-bold">Successfully sliced into {scriptChunks.length} scenes.</span>
+                          <span className="text-[10px] uppercase tracking-widest font-black">Process them one by one.</span>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 gap-4">
+                          {scriptChunks.map((chunk, idx) => (
+                            <div key={chunk.id} className={`p-5 rounded-[1.5rem] border transition-all ${chunk.status === 'done' ? 'bg-green-900/10 border-green-900/30' : chunk.status === 'error' ? 'bg-red-900/10 border-red-900/30' : 'bg-zinc-900/40 border-zinc-800'}`}>
+                              <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-4">
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="text-sm font-black uppercase text-zinc-200 mb-1 truncate">{chunk.heading || '[NO HEADING - AI WILL INFER]'}</h4>
+                                  <p className="text-xs text-zinc-500 line-clamp-2 font-mono">{chunk.text.substring((chunk.heading || '').length).trim()}</p>
+                                </div>
+                                <div className="shrink-0">
+                                  {chunk.status === 'done' ? (
+                                    <span className="flex items-center gap-1 text-[10px] font-black text-green-500 bg-green-500/10 px-3 py-1.5 rounded-full"><CheckCircle2 size={14}/> PROCESSED</span>
+                                  ) : chunk.status === 'processing' ? (
+                                    <span className="flex items-center gap-2 text-[10px] font-black text-purple-400 bg-purple-500/10 px-4 py-1.5 rounded-full"><Loader2 size={14} className="animate-spin"/> BREAKING DOWN...</span>
+                                  ) : (
+                                    <button onClick={() => processScriptChunk(idx)} disabled={isAIBusy || !isRealUser} className="w-full sm:w-auto flex items-center justify-center gap-1 text-[10px] font-black bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-full disabled:opacity-50 transition-colors shadow-lg">
+                                      {!isRealUser ? <Lock size={12}/> : <Wand2 size={12}/>} EXTRACT SHOTS
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* --- TAB: CHARACTER BIBLE --- */}
             {viewMode === 'characters' && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
@@ -1813,130 +1977,6 @@ const App = () => {
                     </div>
                   )}
                 </div>
-              </div>
-            )}
-
-            {/* --- TAB: SCRIPT --- */}
-            {viewMode === 'script' && (
-              <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 space-y-6">
-                
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-800 pb-4">
-                  <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800">
-                    <button onClick={() => setScriptSubTab('editor')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors ${scriptSubTab === 'editor' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-500 hover:text-zinc-300'}`}>MANUAL SCRIPT</button>
-                    {aiEnabled && (
-                      <button onClick={() => setScriptSubTab('breaker')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors flex items-center gap-1.5 ${scriptSubTab === 'breaker' ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' : 'text-zinc-500 hover:text-zinc-300'}`}><Scissors size={12}/> AI SCRIPT BREAKER</button>
-                    )}
-                  </div>
-                  
-                  {scriptSubTab === 'editor' && (
-                    <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
-                      {aiEnabled && (
-                        <>
-                          <button onClick={draftScriptFromConfig} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-blue-900/20 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-900/50 disabled:opacity-50 rounded-full text-[10px] font-black transition-colors whitespace-nowrap">
-                            {loadingStates.scriptDraft ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)} DRAFT FROM CONFIG
-                          </button>
-                          <button onClick={generateScriptFromShots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg shadow-blue-900/20 whitespace-nowrap">
-                            {loadingStates.scriptGen ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Layout size={12} />)} GEN FROM BOARD
-                          </button>
-                        </>
-                      )}
-                      <button onClick={downloadScript} disabled={!activeSketch?.script} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-zinc-800 text-blue-400 hover:bg-zinc-700 disabled:opacity-50 rounded-full text-[10px] font-black transition-all border border-zinc-700"><Download size={12} /> SAVE PDF</button>
-                    </div>
-                  )}
-                </div>
-
-                {scriptSubTab === 'editor' && (
-                  <div className="space-y-4">
-                    <div className="bg-zinc-900/40 border border-zinc-800 rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 relative shadow-xl">
-                      {aiEnabled && (
-                        <button onClick={getPunchUpNotes} disabled={!isRealUser || isAIBusy || !activeSketch?.script} className="absolute top-4 right-4 md:top-6 md:right-6 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-purple-400 disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg border border-zinc-700 flex items-center gap-2 transition-colors z-10">
-                          {loadingStates.punchUp ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} PUNCH UP NOTES
-                        </button>
-                      )}
-                      <textarea value={activeSketch?.script || ''} onChange={(e) => updateSketch(activeSketchId, 'script', e.target.value)} className="w-full bg-zinc-950/80 rounded-2xl p-4 md:p-8 text-xs md:text-sm font-mono text-zinc-300 min-h-[60vh] focus:outline-none border border-zinc-800/50 resize-y leading-relaxed whitespace-pre-wrap shadow-inner pt-12 md:pt-8" placeholder="Generate a script from your storyboard, draft from your config, or type manually..." />
-                    </div>
-
-                    {/* SHOWRUNNER NOTES PANEL */}
-                    {activeSketch?.punchUpNotes && (
-                      <div className="bg-purple-900/10 border border-purple-500/30 rounded-[2rem] p-6 md:p-8 relative shadow-lg animate-in slide-in-from-top-4">
-                        <button onClick={() => updateSketch(activeSketchId, 'punchUpNotes', '')} className="absolute top-4 right-4 p-2 bg-zinc-950/80 hover:bg-zinc-800 rounded-full text-zinc-500 hover:text-white transition-colors border border-zinc-800"><X size={14}/></button>
-                        <h3 className="text-xs font-black text-purple-400 uppercase tracking-widest flex items-center gap-2 mb-4"><Sparkles size={14}/> Showrunner Notes</h3>
-                        <div className="text-sm text-purple-200/80 whitespace-pre-wrap leading-relaxed font-serif">
-                          {activeSketch.punchUpNotes}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {scriptSubTab === 'breaker' && aiEnabled && (
-                  <div className="space-y-6">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                      <div>
-                        <h2 className="text-xl md:text-2xl font-black uppercase tracking-tighter text-purple-500 flex items-center gap-2"><Scissors size={24} /> The Script Breaker</h2>
-                        <p className="text-[10px] text-zinc-400 mt-1 uppercase tracking-widest">Paste a screenplay. Let the AI digest it and build your board.</p>
-                      </div>
-                      {scriptChunks.length > 0 && (
-                        <button onClick={() => { setScriptChunks([]); setRawImportScript(''); }} className="px-4 py-2 bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 rounded-full text-[10px] font-black transition-colors">START OVER</button>
-                      )}
-                    </div>
-
-                    {scriptChunks.length === 0 ? (
-                      <div className="bg-zinc-900/40 border border-zinc-800 rounded-[2rem] p-6 md:p-8 shadow-inner">
-                        <textarea 
-                          value={rawImportScript} 
-                          onChange={(e) => setRawImportScript(e.target.value)} 
-                          placeholder="Paste your script text here... It's best if scenes start with standard headings like INT. LOCATION - DAY, but the AI will try to infer them if missing." 
-                          className="w-full bg-zinc-950/80 rounded-2xl p-4 md:p-6 text-sm font-mono text-zinc-300 min-h-[40vh] focus:outline-none border border-zinc-800/50 resize-y whitespace-pre-wrap"
-                        />
-                        <div className="mt-4 flex flex-col lg:flex-row justify-between gap-4">
-                          <button onClick={() => setRawImportScript(activeSketch?.script || '')} disabled={!activeSketch?.script} className="w-full lg:w-auto px-6 py-3 bg-zinc-800/50 hover:bg-zinc-700 disabled:opacity-50 text-blue-400 font-black text-[10px] rounded-full tracking-widest transition-all flex items-center justify-center gap-2 border border-zinc-800">
-                            <ScrollText size={14}/> PULL FROM SCRIPT EDITOR
-                          </button>
-                          <div className="flex flex-col sm:flex-row justify-end gap-3 w-full lg:w-auto">
-                            <button onClick={analyzeScriptMetadata} disabled={!rawImportScript.trim() || !isRealUser || isAIBusy} className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-purple-400 font-black text-[10px] rounded-full tracking-widest transition-all flex items-center justify-center gap-2">
-                              {loadingStates.analyzeScript ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} 1. ANALYZE METADATA & CAST
-                            </button>
-                            <button onClick={parseScriptIntoChunks} disabled={!rawImportScript.trim()} className="px-6 py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-black text-xs rounded-full tracking-widest shadow-lg shadow-purple-900/20 transition-all flex items-center justify-center gap-2">
-                              <Scissors size={14}/> 2. SLICE INTO SCENES
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="bg-purple-500/10 border border-purple-500/30 rounded-2xl p-4 flex items-center justify-between text-purple-400">
-                          <span className="text-xs font-bold">Successfully sliced into {scriptChunks.length} scenes.</span>
-                          <span className="text-[10px] uppercase tracking-widest font-black">Process them one by one.</span>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 gap-4">
-                          {scriptChunks.map((chunk, idx) => (
-                            <div key={chunk.id} className={`p-5 rounded-[1.5rem] border transition-all ${chunk.status === 'done' ? 'bg-green-900/10 border-green-900/30' : chunk.status === 'error' ? 'bg-red-900/10 border-red-900/30' : 'bg-zinc-900/40 border-zinc-800'}`}>
-                              <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-4">
-                                <div className="flex-1 min-w-0">
-                                  <h4 className="text-sm font-black uppercase text-zinc-200 mb-1 truncate">{chunk.heading || '[NO HEADING - AI WILL INFER]'}</h4>
-                                  <p className="text-xs text-zinc-500 line-clamp-2 font-mono">{chunk.text.substring((chunk.heading || '').length).trim()}</p>
-                                </div>
-                                <div className="shrink-0">
-                                  {chunk.status === 'done' ? (
-                                    <span className="flex items-center gap-1 text-[10px] font-black text-green-500 bg-green-500/10 px-3 py-1.5 rounded-full"><CheckCircle2 size={14}/> PROCESSED</span>
-                                  ) : chunk.status === 'processing' ? (
-                                    <span className="flex items-center gap-2 text-[10px] font-black text-purple-400 bg-purple-500/10 px-4 py-1.5 rounded-full"><Loader2 size={14} className="animate-spin"/> BREAKING DOWN...</span>
-                                  ) : (
-                                    <button onClick={() => processScriptChunk(idx)} disabled={isAIBusy || !isRealUser} className="w-full sm:w-auto flex items-center justify-center gap-1 text-[10px] font-black bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-full disabled:opacity-50 transition-colors shadow-lg">
-                                      {!isRealUser ? <Lock size={12}/> : <Wand2 size={12}/>} EXTRACT SHOTS
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             )}
 
