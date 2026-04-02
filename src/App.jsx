@@ -93,12 +93,12 @@ const App = () => {
   // --- LOCAL STATE (PRIVATE) ---
   const [sketches, setSketches] = useState([{ 
     id: '1', title: 'Welcome to SketchBeans 🎬', 
-    premise: 'A director discovers a digital production rig that does the heavy lifting of pre-production, allowing them to visualize their absurd ideas instantly.',
+    seriesPremise: '', premise: 'A director discovers a digital production rig that does the heavy lifting of pre-production, allowing them to visualize their absurd ideas instantly.',
     genre: 'Comedy', tone: 'Cinematic', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', props: ['Coffee cup', 'Mechanical keyboard'],
     characterProfiles: [
       { id: 'c1', name: 'The Director', sex: 'Female', age: 35, gender: 50, melanin: 50, archetype: 'The Neurotic', desc: 'Staring at a blank screen.', image: null },
       { id: 'c2', name: 'The AI', sex: 'Male', age: 1, gender: 50, melanin: 50, archetype: 'The Wildcard', desc: 'A chaotic but helpful partner.', image: null },
-    ], hook: 'The Director is staring at a blank page.', escalation: 'They open SketchBeans.', ending: 'They get some sleep.', script: ''
+    ], hook: 'The Director is staring at a blank page.', escalation: 'They open SketchBeans.', ending: 'They get some sleep.', script: '', punchUpNotes: ''
   }]);
   const [shots, setShots] = useState([
     { id: 's1', sketchId: '1', number: 1, type: 'Wide', cameraMove: 'Locked Off', duration: 8, subject: 'THE DASHBOARD', action: 'Welcome to SketchBeans! The key details of your sketch live right up there under the title. \n\nClick the "SCENE CONFIG" tab to change your location, comedic tone, and visual style.', notes: 'Keep the premise simple. The AI uses it to build everything else.', dialogue: '', fx: false, image: null, sceneHeading: 'INT. THE EDIT BAY - NIGHT', shotCharacters: [] }
@@ -138,7 +138,7 @@ const App = () => {
   const [boardCols, setBoardCols] = useState(2);
   const [printListMode, setPrintListMode] = useState('sequence'); 
   const [bulkHeadingEdit, setBulkHeadingEdit] = useState({ old: null, value: '' });
-  const [bulkCharEdit, setBulkCharEdit] = useState({ id: null, oldName: '', value: '' }); // <-- NEW STATE FOR CHARACTER RENAME
+  const [bulkCharEdit, setBulkCharEdit] = useState({ id: null, oldName: '', value: '' }); 
 
   // --- DERIVED CONTEXT LOGIC ---
   const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
@@ -319,7 +319,6 @@ const App = () => {
   const addCharacter = () => updateSketch(activeSketchId, 'characterProfiles', [...activeProfiles, { id: Date.now().toString(), name: 'New Character', sex: 'Male', age: 30, gender: 50, melanin: 50, archetype: 'The Wildcard', desc: '', image: null }]);
   
   const updateChar = (charId, field, value) => {
-    // Stripped out the dangerous global regex replace from here
     updateSketch(activeSketchId, 'characterProfiles', activeProfiles.map(p => p.id === charId ? { ...p, [field]: value } : p));
   };
 
@@ -334,24 +333,19 @@ const App = () => {
     const charId = bulkCharEdit.id;
     const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    // 1. Update the profile name
     updateSketch(activeSketchId, 'characterProfiles', activeProfiles.map(p => p.id === charId ? { ...p, name: newName } : p));
 
-    // 2. Global Find & Replace (Only if it wasn't the default 'New Character' placeholder)
     if (oldName && oldName !== 'New Character') {
-      
       updateContextState(prev => prev.map(shot => {
         if (shot.sketchId !== activeSketchId) return shot;
         let changed = false;
         let newShot = { ...shot };
 
-        // Update the shot character tags
         if (newShot.shotCharacters?.includes(oldName)) {
           newShot.shotCharacters = newShot.shotCharacters.map(c => c === oldName ? newName : c);
           changed = true;
         }
 
-        // Regex replace in text fields (whole words only)
         const regex = new RegExp(`\\b${escapeRegExp(oldName)}\\b`, 'g');
         ['action', 'dialogue', 'notes', 'subject'].forEach(key => {
           if (newShot[key] && typeof newShot[key] === 'string' && newShot[key].match(regex)) {
@@ -366,7 +360,7 @@ const App = () => {
       let sketchChanged = false;
       let updatedActiveSketch = { ...activeSketch };
       
-      ['premise', 'hook', 'escalation', 'ending', 'script'].forEach(key => {
+      ['seriesPremise', 'premise', 'hook', 'escalation', 'ending', 'script'].forEach(key => {
         if (updatedActiveSketch[key] && typeof updatedActiveSketch[key] === 'string' && updatedActiveSketch[key].match(regexGlobal)) {
           updatedActiveSketch[key] = updatedActiveSketch[key].replace(regexGlobal, newName);
           sketchChanged = true;
@@ -465,7 +459,7 @@ const App = () => {
     const updatedSketches = sketches.filter(s => s.id !== id);
     if (updatedSketches.length === 0) {
       const newId = Date.now().toString();
-      updatedSketches.push({ id: newId, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '' });
+      updatedSketches.push({ id: newId, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: '' });
       setActiveSketchId(newId);
     } else if (activeSketchId === id) setActiveSketchId(updatedSketches[0].id);
     
@@ -473,6 +467,36 @@ const App = () => {
     setShots(prev => prev.filter(s => s.sketchId !== id));
     if (user && isRealUser) try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', id)); } catch (err) {}
     setSketchToDelete(null);
+  };
+
+  const cloneSketchAsEpisode = async (sketchToClone) => {
+    const newId = Date.now().toString();
+    const clonedSketch = {
+      ...sketchToClone,
+      id: newId,
+      title: `${sketchToClone.title} (Ep 2)`,
+      premise: '', // Clear episode specific stuff
+      hook: '',
+      escalation: '',
+      ending: '',
+      script: '',
+      punchUpNotes: ''
+    };
+    
+    setSketches(prev => [...prev, clonedSketch]);
+    setActiveSketchId(newId);
+    if (window.innerWidth < 768) setSidebarOpen(false);
+
+    if (user && isRealUser) {
+      setIsSyncing(true);
+      try {
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', newId), clonedSketch);
+      } catch (err) {
+        console.error("Failed to clone sketch to cloud", err);
+      } finally {
+        setIsSyncing(false);
+      }
+    }
   };
 
   const pushToCloud = async (silent = false) => {
@@ -564,7 +588,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "7.2", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "8.0", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -575,7 +599,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "7.2", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "8.0", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -741,7 +765,7 @@ const App = () => {
 
     let prompt = `CRITICAL INSTRUCTION: Generate a SINGLE, borderless, full-bleed image. ABSOLUTELY NO TEXT, NO BORDERS, NO ARROWS, NO WATERMARKS, NO STORYBOARD MARKS. Just the pure artwork.\n\n`;
     prompt += `VISUAL STYLE: ${stylePrefix}\n\n`;
-    prompt += `SCENE CONTEXT: ${activeSketch?.premise || activeSketch?.title}\n`;
+    prompt += `SCENE CONTEXT: ${activeSketch?.seriesPremise ? `[Series Formula: ${activeSketch.seriesPremise}] ` : ''}${activeSketch?.premise || activeSketch?.title}\n`;
     prompt += `LOCATION: ${location}\n\n`;
     prompt += `IMAGE TO GENERATE: A ${shot.type || 'Medium'} shot of ${shot.subject || 'subject'}. `;
     if (shot.cameraMove && shot.cameraMove !== 'Locked Off') prompt += `The camera is moving: ${shot.cameraMove}. `;
@@ -761,21 +785,45 @@ const App = () => {
     const shot = activeShots.find(s => s.id === shotId);
     let promptText = getShotPrompt(shot);
 
+    const charImages = (shot.shotCharacters || [])
+      .map(n => activeProfiles.find(p => p.name === n)?.image)
+      .filter(img => img);
+
     const maxRetries = 6; let delay = 3000;
     try {
       for (let i = 0; i < maxRetries; i++) {
         try {
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } })
-          });
-          
-          if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
-          if (response.status === 429) throw new Error("429");
-          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+          let rawImageUrl = "";
 
-          const result = await response.json();
-          const rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+          if (charImages.length > 0) {
+            promptText = `[CHARACTER REFERENCE PHOTOS ATTACHED] Use the attached images as strict visual references for the actors in this shot. Match their likeness, face, and presentation exactly. \n\n${promptText}`;
+            const parts = charImages.map(img => ({ inlineData: { mimeType: img.split(';')[0].split(':')[1], data: img.split(',')[1] } }));
+            parts.push({ text: promptText });
+
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${activeKey}`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ role: "user", parts: parts }], generationConfig: { responseModalities: ["IMAGE"] } })
+            });
+            if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
+            if (response.status === 429) throw new Error("429");
+            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+
+            const result = await response.json();
+            const inlineData = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
+            if (!inlineData) throw new Error("No image data returned from model.");
+            rawImageUrl = `data:${inlineData.mimeType};base64,${inlineData.data}`;
+          } else {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } })
+            });
+            if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
+            if (response.status === 429) throw new Error("429");
+            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
+
+            const result = await response.json();
+            rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+          }
           
           setFullResImages(prev => ({ ...prev, [shotId]: rawImageUrl }));
 
@@ -1050,7 +1098,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, extractChars: true }));
     try {
       const systemPrompt = `Analyze the scene premise, hook, escalation, and ending. Identify distinct characters mentioned. Return a JSON array of objects with keys: "name" (string), "sex" (Male, Female, or Intersex), "age" (number 1-100), "gender" (number 0-100, 0=femme, 100=masc), "melanin" (number 0-100, 0=light, 100=dark), "archetype" (Must be one of: ${COMEDY_ARCHETYPES.join(', ')}), "desc" (1 short punchy sentence). Do not invent characters not implied by the text.`;
-      const prompt = `Premise: ${activeSketch.premise}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}`;
+      const prompt = `Series Engine: ${activeSketch.seriesPremise}\nPremise: ${activeSketch.premise}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}`;
       const extracted = await callGemini(prompt, systemPrompt, true);
       
       if (extracted && Array.isArray(extracted) && extracted.length > 0) {
@@ -1065,12 +1113,7 @@ const App = () => {
   };
 
   const generateAISHots = async (count = 8, type = 'sequence') => {
-    // Failsafe: if called via standard onClick without args, event object is passed
-    if (typeof count !== 'number') {
-      count = 8;
-      type = 'sequence';
-    }
-
+    if (typeof count !== 'number') { count = 8; type = 'sequence'; }
     setLoadingStates(prev => ({ ...prev, genShots: true }));
     try {
       const typeList = SHOT_TYPES.join(', ');
@@ -1088,18 +1131,16 @@ const App = () => {
       
       let recentShotsContext = "";
       if (activeShots.length > 0 && type !== 'opening') {
-        // Grab the last 6 shots so the AI knows exactly where we are in the scene geography
         const recent = activeShots.slice(-6).map(s => `Shot ${s.number} (${s.sceneHeading}): [${s.type}] ${s.subject} - ${s.action}`).join('\n');
         recentShotsContext = `\n\nCURRENT SEQUENCE SO FAR (Continue logically from the last shot):\n${recent}`;
       }
 
-      const prompt = `PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nESCALATION: ${activeSketch?.escalation}\nENDING: ${activeSketch?.ending}${recentShotsContext}`;
+      const prompt = `SERIES ENGINE: ${activeSketch?.seriesPremise}\nEPISODE PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nCHARACTERS AVAILABLE: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nESCALATION: ${activeSketch?.escalation}\nENDING: ${activeSketch?.ending}${recentShotsContext}`;
       
       const newShotsData = await callGemini(prompt, systemPrompt, true);
       
       let normalizedData = newShotsData;
       if (normalizedData && !Array.isArray(normalizedData)) {
-        // Fallback: If AI hallucinates a wrapper object or a raw single object, force it into an array
         normalizedData = normalizedData.shots ? normalizedData.shots : [normalizedData];
       }
 
@@ -1127,43 +1168,8 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, genShots: false })); }
   };
 
-  const generateSingleAIShot = async () => {
-    setLoadingStates(prev => ({ ...prev, singleAIShot: true }));
-    try {
-      const typeList = SHOT_TYPES.join(', ');
-      const cameraMoveList = CAMERA_MOVES.join(', ');
-      const systemPrompt = `Expert director. Generate exactly ONE new shot to continue the sequence. Return a SINGLE JSON OBJECT with these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "duration" (estimated seconds, number), "cameraMove" (Must be one of: ${cameraMoveList}), "shotCharacters" (array of strings). CRITICAL: Treat every character as a distinctly separate individual. Do not merge their actions or dialogue. Keep all text punchy, direct, and brief.`;
-      const recentShots = activeShots.slice(-3).map(s => `Scene: ${s.sceneHeading}, Shot ${s.number}: [${s.type}] ${s.subject} - ${s.action}`).join('\n');
-      const prompt = `PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nCHARACTERS: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nRECENT SHOTS:\n${recentShots}\n\nCreate the NEXT logical shot to build the scene.`;
-      const newShotData = await callGemini(prompt, systemPrompt, true);
-      if (newShotData) {
-        updateContextState(prev => {
-          const currentSketchShots = prev.filter(s => s.sketchId === activeSketchId);
-          const maxNum = currentSketchShots.length > 0 ? Math.max(...currentSketchShots.map(s => s.number)) : 0;
-          const lastHeading = currentSketchShots.length > 0 ? currentSketchShots[currentSketchShots.length - 1].sceneHeading : 'INT. LOCATION - DAY';
-          
-          const newShot = {
-            ...newShotData, 
-            id: `ai-single-${Date.now()}`, 
-            sketchId: activeSketchId, 
-            number: maxNum + 1,
-            fx: false, 
-            image: null, 
-            sceneHeading: newShotData.sceneHeading || lastHeading, 
-            cameraMove: CAMERA_MOVES.includes(newShotData.cameraMove) ? newShotData.cameraMove : 'Locked Off',
-            duration: parseInt(newShotData.duration) || 5,
-            shotCharacters: Array.isArray(newShotData.shotCharacters) ? newShotData.shotCharacters : []
-          };
-          return [...prev, newShot];
-        }, false);
-      }
-    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, singleAIShot: false })); }
-  };
-
   const optimizeShootOrder = async (isPrintList = false) => {
-    // Prevent event object from passing as argument
     const printTrigger = typeof isPrintList === 'boolean' ? isPrintList : false;
-    
     setLoadingStates(prev => ({ ...prev, optimizing: true }));
     try {
       const systemPrompt = `Expert 1st AD. Reorder shots into most efficient SHOOT ORDER. Group by Scene Headings, Location Caveats, Shot Types, and active Characters. Return JSON array of objects with 'id' and 'reason'.`;
@@ -1187,16 +1193,44 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, optimizing: false })); }
   };
 
-  const generateScript = async () => {
-    setLoadingStates(prev => ({ ...prev, script: true }));
+  const generateScriptFromShots = async () => {
+    setLoadingStates(prev => ({ ...prev, scriptGen: true }));
     try {
       const systemPrompt = `You are an expert writer specializing in ${activeSketch?.tone} scripts. Turn this shot list and outline into a formatted script. Write in PLAIN TEXT standard screenplay format. CRITICAL: DO NOT use any HTML tags like <center> or <b>. Use ALL CAPS for scene headings and character names. Use standard line breaks and spacing to format action lines and dialogue.`;
-      const prompt = `Title: ${activeSketch?.title}\nPremise: ${activeSketch?.premise}\nTone: ${activeSketch?.tone}\nCharacter Profiles: ${richCharactersContext}\nProps: ${activePropsList.join(', ')}\n\nShot List:\n${activeShots.map(s => `SCENE: ${s.sceneHeading}\nShot ${s.number} (${s.type} - ${s.cameraMove}): ${s.subject}\nAction: ${s.action}\nNotes: ${s.notes}\nDialogue: ${s.dialogue}`).join('\n\n')}`;
+      const prompt = `Title: ${activeSketch?.title}\nSeries Engine: ${activeSketch?.seriesPremise}\nPremise: ${activeSketch?.premise}\nTone: ${activeSketch?.tone}\nCharacter Profiles: ${richCharactersContext}\nProps: ${activePropsList.join(', ')}\n\nShot List:\n${activeShots.map(s => `SCENE: ${s.sceneHeading}\nShot ${s.number} (${s.type} - ${s.cameraMove}): ${s.subject}\nAction: ${s.action}\nNotes: ${s.notes}\nDialogue: ${s.dialogue}`).join('\n\n')}`;
       const scriptContent = await callGemini(prompt, systemPrompt, false);
       if (scriptContent) {
         updateSketch(activeSketchId, 'script', scriptContent);
       }
-    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, script: false })); }
+    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, scriptGen: false })); }
+  };
+
+  const draftScriptFromConfig = async () => {
+    if (activeSketch?.script && activeSketch.script.trim().length > 0) {
+      if (!window.confirm("🚨 This will overwrite your current script draft. Continue?")) return;
+    }
+    setLoadingStates(prev => ({ ...prev, scriptDraft: true }));
+    try {
+      const systemPrompt = `You are an expert ${activeSketch?.genre || 'comedy'} writer specializing in a ${activeSketch?.tone} tone. Based on the master project configuration, draft a complete 2-3 page screenplay. Write in PLAIN TEXT standard screenplay format. CRITICAL: DO NOT use any HTML tags. Use ALL CAPS for scene headings and character names. Escalate the premise intelligently and bring the hook to a satisfying ending.`;
+      const prompt = `Title: ${activeSketch?.title}\nSeries Engine / Formula: ${activeSketch?.seriesPremise || 'N/A'}\nEpisode Premise: ${activeSketch?.premise}\nHook: ${activeSketch?.hook}\nEscalation: ${activeSketch?.escalation}\nEnding: ${activeSketch?.ending}\nCharacter Profiles: ${richCharactersContext}\nProps to feature: ${activePropsList.join(', ')}`;
+      const scriptContent = await callGemini(prompt, systemPrompt, false);
+      if (scriptContent) {
+        updateSketch(activeSketchId, 'script', scriptContent);
+      }
+    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, scriptDraft: false })); }
+  };
+
+  const getPunchUpNotes = async () => {
+    if (!activeSketch?.script || activeSketch.script.trim().length === 0) return alert("Write or generate a script first to get punch-up notes!");
+    setLoadingStates(prev => ({ ...prev, punchUp: true }));
+    try {
+      const systemPrompt = `You are a seasoned showrunner. Read the following script and provide 3-5 specific, highly actionable 'punch-up' notes. Your goal is to elevate the ${activeSketch?.tone} tone. Suggest alt-lines for dialogue, ways to escalate the physical action, or point out pacing issues. Keep it concise, punchy, and formatted as a clear bulleted list. Do not rewrite the entire script for them.`;
+      const prompt = `Series Engine: ${activeSketch?.seriesPremise}\nEpisode Premise: ${activeSketch?.premise}\n\nCURRENT SCRIPT DRAFT:\n${activeSketch.script}`;
+      const feedback = await callGemini(prompt, systemPrompt, false);
+      if (feedback) {
+        updateSketch(activeSketchId, 'punchUpNotes', feedback);
+      }
+    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, punchUp: false })); }
   };
 
   const generateTextAssist = async (shotId, field, rolePrompt, contextPrompt) => {
@@ -1236,7 +1270,7 @@ const App = () => {
          taskDesc = `Task: Enhance the existing ${beatType.toUpperCase()}: "${existingText}".`;
       }
       
-      const prompt = `Title: ${activeSketch?.title}\nCharacter Profiles: ${richCharactersContext}\n${beatType !== 'premise' ? `Current Premise: ${activeSketch?.premise}\n` : ''}${taskDesc}`;
+      const prompt = `Title: ${activeSketch?.title}\nSeries Engine: ${activeSketch?.seriesPremise}\nCharacter Profiles: ${richCharactersContext}\n${beatType !== 'premise' ? `Current Premise: ${activeSketch?.premise}\n` : ''}${taskDesc}`;
       const newBeat = await callGemini(prompt, systemPrompt, false);
       if (newBeat) {
         setHistory(prev => ({ ...prev, [`sketch-${beatType}`]: activeSketch[beatType] || '' }));
@@ -1258,7 +1292,7 @@ const App = () => {
     const char = activeProfiles.find(c => c.id === charId);
     try {
       const existing = char.desc ? `CURRENT DETAILS (YES, AND... THESE): "${char.desc}"\n` : '';
-      const prompt = `Premise: ${activeSketch?.premise}\nSketch Hook: ${activeSketch?.hook}\nCharacter Name: ${char.name}\nCharacter Tropes: ${char.archetype}, ${char.age} years old, ${char.sex || 'Person'}, ${getGenderText(char.gender)}, ${getSkinText(char.melanin)}\n${existing}Task: Write a character introduction for a screenplay. Describe what we SEE (weird physical traits, wardrobe, posture) and their fatal flaw. Max 1-2 vivid sentences.`;
+      const prompt = `Series Engine: ${activeSketch?.seriesPremise}\nPremise: ${activeSketch?.premise}\nSketch Hook: ${activeSketch?.hook}\nCharacter Name: ${char.name}\nCharacter Tropes: ${char.archetype}, ${char.age} years old, ${char.sex || 'Person'}, ${getGenderText(char.gender)}, ${getSkinText(char.melanin)}\n${existing}Task: Write a character introduction for a screenplay. Describe what we SEE (weird physical traits, wardrobe, posture) and their fatal flaw. Max 1-2 vivid sentences.`;
       const newDesc = await callGemini(prompt, `Expert writer (${activeSketch?.tone || 'dramatic'} tone).`, false);
       if (newDesc) {
         setHistory(prev => ({ ...prev, [`char-${charId}-desc`]: char.desc || '' }));
@@ -1353,6 +1387,9 @@ const App = () => {
                 <FileText size={16} className="shrink-0" /> <span className="truncate font-medium text-sm">{sketch.title || 'Untitled'}</span>
               </button>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={(e) => { e.stopPropagation(); cloneSketchAsEpisode(sketch); }} className="hover:text-green-400 p-1.5" title="Duplicate as New Episode">
+                  <Copy size={14} />
+                </button>
                 <button onClick={(e) => { e.stopPropagation(); exportSingleSketch(sketch.id); }} className="hover:text-blue-400 p-1.5" title="Export Project">
                   <Download size={14} />
                 </button>
@@ -1362,7 +1399,7 @@ const App = () => {
               </div>
             </div>
           ))}
-          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW PROJECT</button>
+          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: '' }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW PROJECT</button>
         </nav>
 
         {/* CLOUD SYNC & BYOK PANEL */}
@@ -1501,10 +1538,19 @@ const App = () => {
                   <input value={activeSketch?.title || ''} onChange={(e) => updateSketch(activeSketchId, 'title', e.target.value)} placeholder="Untitled Project..." className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 text-xl font-black focus:outline-none focus:border-orange-500/50 text-zinc-200" />
                 </div>
 
+                {/* THE SERIES ENGINE */}
+                <div className="space-y-2 bg-zinc-900/20 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 border-dashed">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between mb-2">
+                    <span className="flex items-center gap-2">Series Engine / Recurring Formula (Optional)</span>
+                    <button onClick={() => handleVoiceInput(activeSketch?.seriesPremise, (val) => updateSketch(activeSketchId, 'seriesPremise', val), 'seriesPremise')} className={`p-1.5 rounded transition-colors ${activeMicId === 'seriesPremise' ? 'bg-red-500/20 text-red-500 animate-pulse' : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
+                  </label>
+                  <textarea value={activeSketch?.seriesPremise || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesPremise', e.target.value)} placeholder="If this is part of a recurring series, describe the master formula here. (e.g. In every episode, two inept cops try to interrogate a completely innocent object.)" className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 md:p-6 text-sm focus:outline-none focus:border-zinc-500/50 min-h-[80px] resize-y text-zinc-400 italic" />
+                </div>
+
                 {/* THE PREMISE SEED */}
                 <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
                   <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
-                    <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> The Premise / Logline</span>
+                    <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> The Episode Premise / Logline</span>
                     <div className="flex items-center gap-1.5">
                       <button onClick={() => handleVoiceInput(activeSketch?.premise, (val) => updateSketch(activeSketchId, 'premise', val), 'premise')} className={`p-1.5 rounded transition-colors ${activeMicId === 'premise' ? 'bg-red-500/20 text-red-500 animate-pulse' : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
                       {history[`sketch-premise`] !== undefined && (
@@ -1517,7 +1563,7 @@ const App = () => {
                       )}
                     </div>
                   </label>
-                  <textarea value={activeSketch?.premise || ''} onChange={(e) => updateSketch(activeSketchId, 'premise', e.target.value)} placeholder="Describe the basic concept here to act as a seed for the AI... (e.g. A guy attends a deeply serious funeral but gets stuck in his mascot uniform.)" className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 md:p-6 text-sm focus:outline-none focus:border-orange-500/50 min-h-[100px] resize-y text-zinc-200" />
+                  <textarea value={activeSketch?.premise || ''} onChange={(e) => updateSketch(activeSketchId, 'premise', e.target.value)} placeholder="Describe the basic concept for THIS specific sketch... (e.g. A guy attends a deeply serious funeral but gets stuck in his mascot uniform.)" className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 md:p-6 text-sm focus:outline-none focus:border-orange-500/50 min-h-[100px] resize-y text-zinc-200" />
                 </div>
 
                 {/* AESTHETICS & PROPS ROW */}
@@ -1750,20 +1796,43 @@ const App = () => {
                   </div>
                   
                   {scriptSubTab === 'editor' && (
-                    <div className="flex gap-2 w-full sm:w-auto">
+                    <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
                       {aiEnabled && (
-                        <button onClick={generateScript} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-xs font-black shadow-lg shadow-blue-900/20 whitespace-nowrap">
-                          {loadingStates.script ? <Loader2 size={14} className="animate-spin" /> : (!isRealUser ? <Lock size={14} /> : <Sparkles size={14} />)} GENERATE SCRIPT
-                        </button>
+                        <>
+                          <button onClick={draftScriptFromConfig} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-blue-900/20 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-900/50 disabled:opacity-50 rounded-full text-[10px] font-black transition-colors whitespace-nowrap">
+                            {loadingStates.scriptDraft ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)} DRAFT FROM CONFIG
+                          </button>
+                          <button onClick={generateScriptFromShots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg shadow-blue-900/20 whitespace-nowrap">
+                            {loadingStates.scriptGen ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Layout size={12} />)} GEN FROM BOARD
+                          </button>
+                        </>
                       )}
-                      <button onClick={downloadScript} disabled={!activeSketch?.script} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 py-2.5 bg-zinc-800 text-blue-400 hover:bg-zinc-700 disabled:opacity-50 rounded-full text-xs font-black transition-all border border-zinc-700"><Download size={14} /> SAVE PDF</button>
+                      <button onClick={downloadScript} disabled={!activeSketch?.script} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-zinc-800 text-blue-400 hover:bg-zinc-700 disabled:opacity-50 rounded-full text-[10px] font-black transition-all border border-zinc-700"><Download size={12} /> SAVE PDF</button>
                     </div>
                   )}
                 </div>
 
                 {scriptSubTab === 'editor' && (
-                  <div className="bg-zinc-900/40 border border-zinc-800 rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 relative shadow-xl">
-                    <textarea value={activeSketch?.script || ''} onChange={(e) => updateSketch(activeSketchId, 'script', e.target.value)} className="w-full bg-zinc-950/80 rounded-2xl p-4 md:p-8 text-xs md:text-sm font-mono text-zinc-300 min-h-[70vh] focus:outline-none border border-zinc-800/50 resize-y leading-relaxed whitespace-pre-wrap shadow-inner" placeholder="Generate a script from your storyboard, or type manually..." />
+                  <div className="space-y-4">
+                    <div className="bg-zinc-900/40 border border-zinc-800 rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 relative shadow-xl">
+                      {aiEnabled && (
+                        <button onClick={getPunchUpNotes} disabled={!isRealUser || isAIBusy || !activeSketch?.script} className="absolute top-4 right-4 md:top-6 md:right-6 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-purple-400 disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg border border-zinc-700 flex items-center gap-2 transition-colors z-10">
+                          {loadingStates.punchUp ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} PUNCH UP NOTES
+                        </button>
+                      )}
+                      <textarea value={activeSketch?.script || ''} onChange={(e) => updateSketch(activeSketchId, 'script', e.target.value)} className="w-full bg-zinc-950/80 rounded-2xl p-4 md:p-8 text-xs md:text-sm font-mono text-zinc-300 min-h-[60vh] focus:outline-none border border-zinc-800/50 resize-y leading-relaxed whitespace-pre-wrap shadow-inner pt-12 md:pt-8" placeholder="Generate a script from your storyboard, draft from your config, or type manually..." />
+                    </div>
+
+                    {/* SHOWRUNNER NOTES PANEL */}
+                    {activeSketch?.punchUpNotes && (
+                      <div className="bg-purple-900/10 border border-purple-500/30 rounded-[2rem] p-6 md:p-8 relative shadow-lg animate-in slide-in-from-top-4">
+                        <button onClick={() => updateSketch(activeSketchId, 'punchUpNotes', '')} className="absolute top-4 right-4 p-2 bg-zinc-950/80 hover:bg-zinc-800 rounded-full text-zinc-500 hover:text-white transition-colors border border-zinc-800"><X size={14}/></button>
+                        <h3 className="text-xs font-black text-purple-400 uppercase tracking-widest flex items-center gap-2 mb-4"><Sparkles size={14}/> Showrunner Notes</h3>
+                        <div className="text-sm text-purple-200/80 whitespace-pre-wrap leading-relaxed font-serif">
+                          {activeSketch.punchUpNotes}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1980,8 +2049,6 @@ const App = () => {
                                 )}
                               </div>
                               
-                              {shot.lastEditedBy && <div className="mt-2 text-[9px] text-blue-400 italic">Last edit by: {shot.lastEditedBy}</div>}
-
                               <div className="flex flex-col gap-2 w-full mt-4">
                                 <div className="flex items-center bg-zinc-950/50 border border-zinc-800/50 rounded-xl px-3 py-3 md:py-2 w-full focus-within:border-orange-500/50 transition-colors">
                                   <Clapperboard size={12} className="text-orange-500 mr-2 shrink-0" />
