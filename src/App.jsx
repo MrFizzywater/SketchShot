@@ -1194,6 +1194,39 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, genShots: false })); }
   };
 
+  const generateSingleAIShot = async () => {
+    setLoadingStates(prev => ({ ...prev, singleAIShot: true }));
+    try {
+      const typeList = SHOT_TYPES.join(', ');
+      const cameraMoveList = CAMERA_MOVES.join(', ');
+      const systemPrompt = `Expert director. Generate exactly ONE new shot to continue the sequence. Return a SINGLE JSON OBJECT with these EXACT keys: "type" (MUST BE EXACTLY ONE OF: ${typeList}), "subject", "action", "notes", "dialogue", "duration" (estimated seconds, number), "cameraMove" (Must be one of: ${cameraMoveList}), "shotCharacters" (array of strings). CRITICAL: Treat every character as a distinctly separate individual. Do not merge their actions or dialogue. Keep all text punchy, direct, and brief.`;
+      const recentShots = activeShots.slice(-3).map(s => `Scene: ${s.sceneHeading}, Shot ${s.number}: [${s.type}] ${s.subject} - ${s.action}`).join('\n');
+      const prompt = `SERIES ENGINE: ${activeSketch?.seriesPremise}\nEPISODE PREMISE: ${activeSketch?.premise}\nTONE: ${activeSketch?.tone}\nCHARACTERS: ${richCharactersContext}\nHOOK: ${activeSketch?.hook}\nRECENT SHOTS:\n${recentShots}\n\nCreate the NEXT logical shot to build the scene.`;
+      const newShotData = await callGemini(prompt, systemPrompt, true);
+      if (newShotData) {
+        updateContextState(prev => {
+          const currentSketchShots = prev.filter(s => s.sketchId === activeSketchId);
+          const maxNum = currentSketchShots.length > 0 ? Math.max(...currentSketchShots.map(s => s.number)) : 0;
+          const lastHeading = currentSketchShots.length > 0 ? currentSketchShots[currentSketchShots.length - 1].sceneHeading : 'INT. LOCATION - DAY';
+          
+          const newShot = {
+            ...newShotData, 
+            id: `ai-single-${Date.now()}`, 
+            sketchId: activeSketchId, 
+            number: maxNum + 1,
+            fx: false, 
+            image: null, 
+            sceneHeading: newShotData.sceneHeading || lastHeading, 
+            cameraMove: CAMERA_MOVES.includes(newShotData.cameraMove) ? newShotData.cameraMove : 'Locked Off',
+            duration: parseInt(newShotData.duration) || 5,
+            shotCharacters: Array.isArray(newShotData.shotCharacters) ? newShotData.shotCharacters : []
+          };
+          return [...prev, newShot];
+        }, false);
+      }
+    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, singleAIShot: false })); }
+  };
+
   const optimizeShootOrder = async (isPrintList = false) => {
     const printTrigger = typeof isPrintList === 'boolean' ? isPrintList : false;
     setLoadingStates(prev => ({ ...prev, optimizing: true }));
