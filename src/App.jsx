@@ -24,6 +24,7 @@ let firebaseConfig = {};
 let globalTextModel = "gemini-flash-latest"; 
 let globalImageModel = "imagen-4.0-generate-001"; 
 
+// 1. Decouple AI Models: Force the rig to ALWAYS listen to Coolify's environment variables first
 try {
   if (typeof import.meta !== 'undefined' && import.meta.env) {
     if (import.meta.env.VITE_GEMINI_TEXT_MODEL) globalTextModel = import.meta.env.VITE_GEMINI_TEXT_MODEL;
@@ -31,6 +32,7 @@ try {
   }
 } catch (e) { /* Ignore */ }
 
+// 2. Initialize Firebase
 if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 } else {
@@ -122,6 +124,50 @@ const mergeCharacters = (existingProfiles, newAICharacters) => {
   return updatedProfiles;
 };
 
+// HELPER: Robust free image generator to avoid CORS blob issues
+const fetchFreeImage = (promptText, width, height) => {
+  return new Promise((resolve, reject) => {
+    const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim() + " cinematic, highly detailed");
+    const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
+    
+    const img = new Image();
+    img.crossOrigin = "Anonymous"; // Forces CORS request
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => reject(new Error("Free image generator failed to load."));
+    img.src = url;
+  });
+};
+
+const fetchFreeAvatar = (promptText) => {
+  return new Promise((resolve, reject) => {
+    const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim());
+    const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=512&height=512&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
+    
+    const img = new Image();
+    img.crossOrigin = "Anonymous";
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      const size = Math.min(img.width, img.height);
+      const x = (img.width - size) / 2;
+      const y = (img.height - size) / 2;
+      ctx.drawImage(img, x, y, size, size, 0, 0, 256, 256);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => reject(new Error("Free image generator failed to load."));
+    img.src = url;
+  });
+};
+
 const App = () => {
   const [user, setUser] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
@@ -164,6 +210,7 @@ const App = () => {
   const [fullResImages, setFullResImages] = useState({});
   const [userApiKey, setUserApiKey] = useState(localStorage.getItem('sketchbeans_gemini_key') || '');
   const [aiEnabled, setAiEnabled] = useState(localStorage.getItem('sketchbeans_ai_enabled') === 'true');
+  const [useFreeImageGen, setUseFreeImageGen] = useState(localStorage.getItem('sb_free_img') === 'true');
   const [history, setHistory] = useState({});
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -603,7 +650,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "8.4", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "8.5", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -614,7 +661,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "8.4", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "8.5", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -807,45 +854,36 @@ const App = () => {
     const shot = activeShots.find(s => s.id === shotId);
     let promptText = getShotPrompt(shot);
 
-    const charImages = (shot.shotCharacters || [])
-      .map(n => activeProfiles.find(p => p.name === n)?.image)
-      .filter(img => img);
+    if (useFreeImageGen) {
+      try {
+        const aspectMap = { '16:9': {w: 800, h: 450}, '1:1': {w: 512, h: 512}, '4:3': {w: 800, h: 600}, '9:16': {w: 450, h: 800}, '3:4': {w: 600, h: 800} };
+        const dims = aspectMap[activeSketch?.aspectRatio || '16:9'];
+        const resultUrl = await fetchFreeImage(promptText, dims.w, dims.h);
+        setFullResImages(prev => ({ ...prev, [shotId]: resultUrl }));
+        updateShot(shotId, 'image', resultUrl);
+      } catch (err) {
+        alert(err.message);
+      }
+      setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: false }));
+      return;
+    }
 
     const maxRetries = 6; let delay = 3000;
     try {
       for (let i = 0; i < maxRetries; i++) {
         try {
-          let rawImageUrl = "";
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } })
+          });
+          
+          if (response.status === 404) throw new Error("404_MODEL_NOT_FOUND");
+          if (response.status === 403 || response.status === 400) throw new Error("FREE_TIER");
+          if (response.status === 429) throw new Error("429");
+          if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
 
-          if (charImages.length > 0) {
-            promptText = `[CHARACTER REFERENCE PHOTOS ATTACHED] Use the attached images as strict visual references for the actors in this shot. Match their likeness, face, and presentation exactly. \n\n${promptText}`;
-            const parts = charImages.map(img => ({ inlineData: { mimeType: img.split(';')[0].split(':')[1], data: img.split(',')[1] } }));
-            parts.push({ text: promptText });
-
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${activeKey}`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ role: "user", parts: parts }], generationConfig: { responseModalities: ["IMAGE"] } })
-            });
-            if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
-            if (response.status === 429) throw new Error("429");
-            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
-
-            const result = await response.json();
-            const inlineData = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
-            if (!inlineData) throw new Error("No image data returned from model.");
-            rawImageUrl = `data:${inlineData.mimeType};base64,${inlineData.data}`;
-          } else {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalImageModel}:predict?key=${activeKey}`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: activeSketch?.aspectRatio || '16:9' } })
-            });
-            if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
-            if (response.status === 429) throw new Error("429");
-            if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
-
-            const result = await response.json();
-            rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
-          }
+          const result = await response.json();
+          const rawImageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
           
           setFullResImages(prev => ({ ...prev, [shotId]: rawImageUrl }));
 
@@ -862,34 +900,21 @@ const App = () => {
           img.src = rawImageUrl;
           break; 
         } catch (error) {
+          if (error.message === "404_MODEL_NOT_FOUND") {
+             alert(`Google returned a 404 error. Your API key likely doesn't have access to '${globalImageModel}'.\n\nFix: Change your VITE_GEMINI_IMAGE_MODEL in Coolify to 'imagen-3.0-generate-001', or toggle on the Free Image Generator in the sidebar.`);
+             break;
+          }
           if (error.message === "FREE_TIER") {
             if (!sessionStorage.getItem('sb_free_warn')) {
-              alert("Heads up: Your Gemini API key is on the Free Tier, which Google blocks from their image generator.\n\nTo save the shoot, I am dynamically rerouting your image requests to an open-source indie engine (Pollinations.ai) so you can still build your board!");
+              alert("Heads up: Your Gemini API key is on the Free Tier, which Google blocks from their image generator.\n\nTo save the shoot, I am dynamically rerouting your image requests to an open-source indie engine (Pollinations.ai) so you can still build your board! Turn on the 'Free Image Gen' toggle in the sidebar to bypass this warning next time.");
               sessionStorage.setItem('sb_free_warn', 'true');
             }
             const aspectMap = { '16:9': {w: 800, h: 450}, '1:1': {w: 512, h: 512}, '4:3': {w: 800, h: 600}, '9:16': {w: 450, h: 800}, '3:4': {w: 600, h: 800} };
             const dims = aspectMap[activeSketch?.aspectRatio || '16:9'];
-            const safePrompt = encodeURIComponent((promptText.substring(0, 900) + " cinematic lighting, highly detailed").trim());
-            const fResp = await fetch(`https://image.pollinations.ai/prompt/${safePrompt}?width=${dims.w}&height=${dims.h}&nologo=true&seed=${Math.floor(Math.random()*10000)}`);
-            const blob = await fResp.blob();
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const fallbackUrl = reader.result;
-              setFullResImages(prev => ({ ...prev, [shotId]: fallbackUrl }));
-              const img = new Image();
-              img.onload = () => {
-                const canvas = document.createElement('canvas');
-                let width = img.width; let height = img.height;
-                const MAX_WIDTH = 800; 
-                if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
-                canvas.width = width; canvas.height = height;
-                const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-                updateShot(shotId, 'image', canvas.toDataURL('image/jpeg', 0.7));
-              };
-              img.src = fallbackUrl;
-            };
-            reader.readAsDataURL(blob);
-            break; // Exit the Google retry loop since the free fallback succeeded
+            const resultUrl = await fetchFreeImage(promptText, dims.w, dims.h);
+            setFullResImages(prev => ({ ...prev, [shotId]: resultUrl }));
+            updateShot(shotId, 'image', resultUrl);
+            break; 
           }
 
           if (i === maxRetries - 1) {
@@ -911,6 +936,17 @@ const App = () => {
     const char = activeProfiles.find(c => c.id === charId);
     const promptText = `A close-up cinematic headshot photograph of a ${char.age} year old ${char.sex || 'person'} with ${getSkinText(char.melanin)} who is ${getGenderText(char.gender)}. Vibe/Archetype: ${char.archetype}. Visuals: ${char.visualStyle}. Personality: ${char.personality}. Plain neutral background. Highly detailed, photorealistic.`;
 
+    if (useFreeImageGen) {
+      try {
+        const resultUrl = await fetchFreeAvatar(promptText);
+        updateChar(charId, 'image', resultUrl);
+      } catch (err) {
+        alert(err.message);
+      }
+      setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: false }));
+      return;
+    }
+
     const maxRetries = 6; let delay = 3000;
     try {
       for (let i = 0; i < maxRetries; i++) {
@@ -920,7 +956,8 @@ const App = () => {
             body: JSON.stringify({ instances: { prompt: promptText }, parameters: { sampleCount: 1, aspectRatio: '1:1' } })
           });
 
-          if (response.status === 403 || response.status === 400 || response.status === 404) throw new Error("FREE_TIER");
+          if (response.status === 404) throw new Error("404_MODEL_NOT_FOUND");
+          if (response.status === 403 || response.status === 400) throw new Error("FREE_TIER");
           if (response.status === 429) throw new Error("429");
           if (!response.ok) throw new Error(`Google API threw a ${response.status}.`);
 
@@ -941,30 +978,17 @@ const App = () => {
           img.src = rawImageUrl;
           break; 
         } catch (error) {
+          if (error.message === "404_MODEL_NOT_FOUND") {
+             alert(`Google returned a 404 error. Your API key likely doesn't have access to '${globalImageModel}'.\n\nFix: Change your VITE_GEMINI_IMAGE_MODEL in Coolify to 'imagen-3.0-generate-001', or toggle on the Free Image Generator in the sidebar.`);
+             break;
+          }
           if (error.message === "FREE_TIER") {
              if (!sessionStorage.getItem('sb_free_warn')) {
-               alert("Heads up: Your Gemini API key is on the Free Tier, which Google blocks from their image generator.\n\nTo save the shoot, I am dynamically rerouting your image requests to an open-source indie engine (Pollinations.ai) so you can still build your board!");
+               alert("Heads up: Your Gemini API key is on the Free Tier, which Google blocks from their image generator.\n\nTo save the shoot, I am dynamically rerouting your image requests to an open-source indie engine (Pollinations.ai) so you can still build your board! Turn on the 'Free Image Gen' toggle in the sidebar to bypass this warning next time.");
                sessionStorage.setItem('sb_free_warn', 'true');
              }
-             const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim());
-             const fResp = await fetch(`https://image.pollinations.ai/prompt/${safePrompt}?width=512&height=512&nologo=true&seed=${Math.floor(Math.random()*10000)}`);
-             const blob = await fResp.blob();
-             const reader = new FileReader();
-             reader.onloadend = () => {
-                const img = new Image();
-                img.onload = () => {
-                  const canvas = document.createElement('canvas');
-                  canvas.width = 256; canvas.height = 256;
-                  const ctx = canvas.getContext('2d'); 
-                  const size = Math.min(img.width, img.height);
-                  const x = (img.width - size) / 2;
-                  const y = (img.height - size) / 2;
-                  ctx.drawImage(img, x, y, size, size, 0, 0, 256, 256);
-                  updateChar(charId, 'image', canvas.toDataURL('image/jpeg', 0.8));
-                };
-                img.src = reader.result;
-             };
-             reader.readAsDataURL(blob);
+             const resultUrl = await fetchFreeAvatar(promptText);
+             updateChar(charId, 'image', resultUrl);
              break; 
           }
 
@@ -1485,6 +1509,24 @@ const App = () => {
                 <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${aiEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
               </button>
             </div>
+            
+            {aiEnabled && (
+              <div className="flex items-center justify-between mt-4">
+                <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-1">
+                  <ImageIcon size={12}/> Free Image Gen
+                </span>
+                <button 
+                  onClick={() => {
+                    const newState = !useFreeImageGen;
+                    setUseFreeImageGen(newState);
+                    localStorage.setItem('sb_free_img', newState.toString());
+                  }}
+                  className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${useFreeImageGen ? 'bg-blue-500' : 'bg-zinc-700'}`}
+                >
+                  <span className={`inline-block h-2 w-2 transform rounded-full bg-white transition-transform ${useFreeImageGen ? 'translate-x-4' : 'translate-x-1'}`} />
+                </button>
+              </div>
+            )}
           </div>
 
           {aiEnabled && (
@@ -2140,13 +2182,13 @@ const App = () => {
                                         <ImageIcon className="text-zinc-800 mx-auto" size={32} />
                                         <label className="text-[10px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 hover:border-orange-500/50 hover:bg-orange-500/10 px-4 py-2 rounded-full flex items-center gap-2 cursor-pointer transition-all">
                                           <Upload size={10} /> UPLOAD
-                                          <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(shot.id, e)} />
                                         </label>
+                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(shot.id, e)} />
                                         {aiEnabled && (
                                           <div className="flex gap-2">
                                             <button onClick={() => setVisiblePromptId(shot.id)} className="text-[9px] font-black text-zinc-600 hover:text-purple-400 flex items-center gap-1 transition-colors uppercase tracking-widest bg-zinc-900 px-3 py-1.5 rounded border border-zinc-800"><FileText size={10} /> PROMPT</button>
-                                            <button onClick={() => generateImage(shot.id)} disabled={!isPersonalKeyActive || loadingStates[`image-${shot.id}`] || isAIBusy} className={`text-[9px] font-black flex items-center gap-1 transition-colors uppercase tracking-widest px-3 py-1.5 rounded border ${isPersonalKeyActive ? 'text-zinc-300 bg-purple-600/20 border-purple-500/30 hover:bg-purple-600 hover:text-white' : 'text-zinc-600 bg-zinc-900 border-zinc-800 opacity-50'}`} title={!isPersonalKeyActive ? "Requires personal API Key in sidebar" : "Generate Image"}>
-                                              {loadingStates[`image-${shot.id}`] ? <Loader2 size={10} className="animate-spin text-purple-400" /> : (!isPersonalKeyActive ? <Lock size={10} /> : <Sparkles size={10} />)} GENERATE
+                                            <button onClick={() => generateImage(shot.id)} disabled={(!isPersonalKeyActive && !useFreeImageGen) || loadingStates[`image-${shot.id}`] || isAIBusy} className={`text-[9px] font-black flex items-center gap-1 transition-colors uppercase tracking-widest px-3 py-1.5 rounded border ${isPersonalKeyActive || useFreeImageGen ? 'text-zinc-300 bg-purple-600/20 border-purple-500/30 hover:bg-purple-600 hover:text-white' : 'text-zinc-600 bg-zinc-900 border-zinc-800 opacity-50'}`} title={!isPersonalKeyActive && !useFreeImageGen ? "Requires personal API Key in sidebar" : "Generate Image"}>
+                                              {loadingStates[`image-${shot.id}`] ? <Loader2 size={10} className="animate-spin text-purple-400" /> : (!isPersonalKeyActive && !useFreeImageGen ? <Lock size={10} /> : <Sparkles size={10} />)} {useFreeImageGen ? 'GEN (FREE)' : 'GENERATE'}
                                             </button>
                                           </div>
                                         )}
