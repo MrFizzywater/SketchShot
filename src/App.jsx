@@ -6,7 +6,7 @@ import {
   X, Download, Upload, Save, Maximize2, Map, 
   ChevronUp, ChevronDown, Clock, ListVideo, Mic,
   UserPlus, ArrowUp, ArrowDown, Cloud, GitBranch, LogOut, Lock, Copy, Menu,
-  ScrollText, VenetianMask, Clapperboard, Key, EyeOff, User, Settings2, Users, Settings, Video, RefreshCcw, ArrowDownToLine, ArrowUpFromLine, Undo, Scissors, CheckCircle2, Film
+  ScrollText, VenetianMask, Clapperboard, Key, EyeOff, User, Settings2, Users, Settings, Video, RefreshCcw, ArrowDownToLine, ArrowUpFromLine, Undo, Scissors, CheckCircle2, Film, Unlock
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -24,7 +24,6 @@ let firebaseConfig = {};
 let globalTextModel = "gemini-flash-latest"; 
 let globalImageModel = "imagen-4.0-generate-001"; 
 
-// 1. Decouple AI Models: Force the rig to ALWAYS listen to Coolify's environment variables first
 try {
   if (typeof import.meta !== 'undefined' && import.meta.env) {
     if (import.meta.env.VITE_GEMINI_TEXT_MODEL) globalTextModel = import.meta.env.VITE_GEMINI_TEXT_MODEL;
@@ -32,7 +31,6 @@ try {
   }
 } catch (e) { /* Ignore */ }
 
-// 2. Initialize Firebase
 if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 } else {
@@ -84,7 +82,7 @@ const formatTime = (secs) => {
   );
 };
 
-// Helper function to safely merge AI-generated characters into the existing cast list
+// Merges characters smartly while respecting the "isLocked" toggle
 const mergeCharacters = (existingProfiles, newAICharacters) => {
   if (!newAICharacters || !Array.isArray(newAICharacters)) return existingProfiles;
   
@@ -95,16 +93,17 @@ const mergeCharacters = (existingProfiles, newAICharacters) => {
     const existingIdx = updatedProfiles.findIndex(p => p.name.toLowerCase() === aiChar.name.toLowerCase());
     
     if (existingIdx >= 0) {
-      // Update existing character
+      if (updatedProfiles[existingIdx].isLocked) return; // STRICT LOCK BYPASS
+      
       updatedProfiles[existingIdx] = {
         ...updatedProfiles[existingIdx],
         sex: aiChar.sex || updatedProfiles[existingIdx].sex,
         age: aiChar.age || updatedProfiles[existingIdx].age,
         archetype: COMEDY_ARCHETYPES.includes(aiChar.archetype) ? aiChar.archetype : updatedProfiles[existingIdx].archetype,
-        desc: aiChar.desc || updatedProfiles[existingIdx].desc
+        visualStyle: aiChar.visualStyle || updatedProfiles[existingIdx].visualStyle,
+        personality: aiChar.personality || updatedProfiles[existingIdx].personality
       };
     } else {
-      // Add new character
       updatedProfiles.push({
         id: Date.now().toString() + Math.random().toString(36).substring(7),
         name: aiChar.name || 'Unknown', 
@@ -113,7 +112,9 @@ const mergeCharacters = (existingProfiles, newAICharacters) => {
         gender: aiChar.gender || 50, 
         melanin: aiChar.melanin || 50,
         archetype: COMEDY_ARCHETYPES.includes(aiChar.archetype) ? aiChar.archetype : 'Other', 
-        desc: aiChar.desc || '', 
+        visualStyle: aiChar.visualStyle || '', 
+        personality: aiChar.personality || '',
+        isLocked: false,
         image: null
       });
     }
@@ -128,14 +129,13 @@ const App = () => {
   const [isGuest, setIsGuest] = useState(localStorage.getItem('sketchbeans_is_guest') === 'true');
   const isRealUser = user && !user.isAnonymous;
 
-  // --- LOCAL STATE (PRIVATE) ---
   const [sketches, setSketches] = useState([{ 
-    id: '1', title: 'Welcome to SketchBeans 🎬', 
+    id: '1', seriesTitle: 'SKETCHBEANS', title: 'The Production Rig', 
     seriesPremise: '', premise: 'A director discovers a digital production rig that does the heavy lifting of pre-production, allowing them to visualize their absurd ideas instantly.',
     genre: 'Comedy', tone: 'Cinematic', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', props: ['Coffee cup', 'Mechanical keyboard'],
     characterProfiles: [
-      { id: 'c1', name: 'The Director', sex: 'Female', age: 35, gender: 50, melanin: 50, archetype: 'The Neurotic', desc: 'Staring at a blank screen.', image: null },
-      { id: 'c2', name: 'The AI', sex: 'Male', age: 1, gender: 50, melanin: 50, archetype: 'The Wildcard', desc: 'A chaotic but helpful partner.', image: null },
+      { id: 'c1', name: 'The Director', sex: 'Female', age: 35, gender: 50, melanin: 50, archetype: 'The Neurotic', visualStyle: 'Disheveled, wearing a faded production company hoodie.', personality: 'Perfectionist constantly on the verge of a breakdown.', isLocked: true, image: null },
+      { id: 'c2', name: 'The AI', sex: 'Male', age: 1, gender: 50, melanin: 50, archetype: 'The Wildcard', visualStyle: 'A glowing orb of chaotic light.', personality: 'Unpredictable, highly literal, overly enthusiastic.', isLocked: false, image: null },
     ], hook: 'The Director is staring at a blank page.', escalation: 'They open SketchBeans.', ending: 'They get some sleep.', script: '', punchUpNotes: []
   }]);
   const [shots, setShots] = useState([
@@ -150,7 +150,6 @@ const App = () => {
   const [showAdvancedBeats, setShowAdvancedBeats] = useState(false);
   const [newPropInput, setNewPropInput] = useState('');
   
-  // --- SCRIPT BREAKER STATE ---
   const [rawImportScript, setRawImportScript] = useState('');
   const [scriptChunks, setScriptChunks] = useState([]);
 
@@ -177,11 +176,8 @@ const App = () => {
   const [printListMode, setPrintListMode] = useState('sequence'); 
   const [bulkHeadingEdit, setBulkHeadingEdit] = useState({ old: null, value: '' });
   const [bulkCharEdit, setBulkCharEdit] = useState({ id: null, oldName: '', value: '' }); 
-  
-  // New State for Punch Up Note Checkboxes
   const [selectedPunchUps, setSelectedPunchUps] = useState([]);
 
-  // --- DERIVED CONTEXT LOGIC ---
   const activeSketch = sketches.find(s => s.id === activeSketchId) || sketches[0];
   const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
   
@@ -201,14 +197,16 @@ const App = () => {
     if (c.archetype) details.push(c.archetype);
     if (c.gender !== undefined) details.push(getGenderText(c.gender));
     if (c.melanin !== undefined) details.push(getSkinText(c.melanin));
-    return `${c.name}${details.length > 0 ? ` [${details.join(', ')}]` : ''}${c.desc ? ` - ${c.desc}` : ''}`;
+    return `${c.name}${details.length > 0 ? ` [${details.join(', ')}]` : ''} - Wardrobe/Visuals: ${c.visualStyle || ''} - Personality: ${c.personality || ''}`;
   }).join(' | ');
+
+  const getFullTitle = () => activeSketch?.seriesTitle ? `${activeSketch.seriesTitle} - ${activeSketch.title}` : (activeSketch?.title || 'Untitled Project');
 
   useEffect(() => {
     if (activeSketchId) localStorage.setItem('sketchbeans_active_sketch', activeSketchId);
     setRawImportScript('');
     setScriptChunks([]);
-    setSelectedPunchUps([]); // Reset checkboxes when changing sketches
+    setSelectedPunchUps([]); 
   }, [activeSketchId]);
 
   useEffect(() => {
@@ -262,7 +260,7 @@ const App = () => {
 
   const loginWithProvider = async () => {
     if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('your_key_here')) {
-      return alert("🚨 FATAL RIG ERROR: Your Firebase API Key is missing! \n\nVite failed to inject the VITE_FIREBASE_API_KEY environment variable. Check your Coolify setup.");
+      return alert("🚨 FATAL RIG ERROR: Your Firebase API Key is missing!");
     }
     const provider = new GoogleAuthProvider();
     try { 
@@ -291,33 +289,21 @@ const App = () => {
     if (isSketch) setSketches(stateUpdater); else setShots(stateUpdater);
   };
 
-  const updateSketch = (id, field, value) => {
-    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s), true);
-  };
-  
-  const updateShot = (id, field, value) => {
-    updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s), false);
-  };
+  const updateSketch = (id, field, value) => updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s), true);
+  const updateShot = (id, field, value) => updateContextState(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s), false);
 
   const updateSceneHeadingBulk = (oldHeading, newHeading) => {
     if (!newHeading || !newHeading.trim() || oldHeading === newHeading) return;
     updateContextState(prev => prev.map(s => {
-      if (s.sketchId === activeSketchId && s.sceneHeading === oldHeading) {
-        return { ...s, sceneHeading: newHeading.toUpperCase() };
-      }
+      if (s.sketchId === activeSketchId && s.sceneHeading === oldHeading) return { ...s, sceneHeading: newHeading.toUpperCase() };
       return s;
     }), false);
   };
 
-  // --- NATIVE VOICE DICTATION ---
   const handleVoiceInput = (currentText, onResult, elementId) => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return alert("Your browser doesn't support voice dictation. Try Chrome or Edge.");
-    
-    if (activeMicId === elementId) {
-      setActiveMicId(null);
-      return; 
-    }
+    if (activeMicId === elementId) { setActiveMicId(null); return; }
 
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
@@ -325,13 +311,11 @@ const App = () => {
     
     recognition.onstart = () => setActiveMicId(elementId);
     recognition.onend = () => setActiveMicId(null);
-    
     recognition.onresult = (e) => {
       const transcript = e.results[0][0].transcript;
       const separator = currentText && !currentText.endsWith(' ') && !currentText.endsWith('\n') ? ' ' : '';
       onResult((currentText || '') + separator + transcript);
     };
-    
     try { recognition.start(); } catch(e) { setActiveMicId(null); }
   };
 
@@ -339,16 +323,12 @@ const App = () => {
     if (e.key === 'Enter' && e.target.value.trim()) {
       e.preventDefault();
       const newProp = e.target.value.trim();
-      if (!activePropsList.includes(newProp)) {
-        updateSketch(activeSketchId, 'props', [...activePropsList, newProp]);
-      }
+      if (!activePropsList.includes(newProp)) updateSketch(activeSketchId, 'props', [...activePropsList, newProp]);
       e.target.value = '';
     }
   };
 
-  const removeProp = (indexToRemove) => {
-    updateSketch(activeSketchId, 'props', activePropsList.filter((_, idx) => idx !== indexToRemove));
-  };
+  const removeProp = (indexToRemove) => updateSketch(activeSketchId, 'props', activePropsList.filter((_, idx) => idx !== indexToRemove));
 
   const toggleShotCharacter = (shotId, charName) => {
     updateContextState(prev => prev.map(s => {
@@ -358,11 +338,8 @@ const App = () => {
     }), false);
   };
 
-  const addCharacter = () => updateSketch(activeSketchId, 'characterProfiles', [...activeProfiles, { id: Date.now().toString(), name: 'New Character', sex: 'Male', age: 30, gender: 50, melanin: 50, archetype: 'The Wildcard', desc: '', image: null }]);
-  
-  const updateChar = (charId, field, value) => {
-    updateSketch(activeSketchId, 'characterProfiles', activeProfiles.map(p => p.id === charId ? { ...p, [field]: value } : p));
-  };
+  const addCharacter = () => updateSketch(activeSketchId, 'characterProfiles', [...activeProfiles, { id: Date.now().toString(), name: 'New Character', sex: 'Male', age: 30, gender: 50, melanin: 50, archetype: 'The Wildcard', visualStyle: '', personality: '', isLocked: false, image: null }]);
+  const updateChar = (charId, field, value) => updateSketch(activeSketchId, 'characterProfiles', activeProfiles.map(p => p.id === charId ? { ...p, [field]: value } : p));
 
   const commitCharRename = () => {
     if (!bulkCharEdit.id || !bulkCharEdit.value.trim() || bulkCharEdit.oldName === bulkCharEdit.value) {
@@ -409,9 +386,7 @@ const App = () => {
         }
       });
       
-      if (sketchChanged) {
-        updateContextState(prev => prev.map(s => s.id === activeSketchId ? { ...s, ...updatedActiveSketch } : s), true);
-      }
+      if (sketchChanged) updateContextState(prev => prev.map(s => s.id === activeSketchId ? { ...s, ...updatedActiveSketch } : s), true);
     }
     
     setBulkCharEdit({ id: null, oldName: '', value: '' });
@@ -443,9 +418,7 @@ const App = () => {
 
   const deleteShot = async (shotId) => {
     updateContextState(prev => prev.filter(s => s.id !== shotId), false);
-    if (user && isRealUser) {
-      try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', shotId)); } catch (e) {}
-    }
+    if (user && isRealUser) try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', shotId)); } catch (e) {}
   };
 
   const clearAllShots = async () => {
@@ -501,7 +474,7 @@ const App = () => {
     const updatedSketches = sketches.filter(s => s.id !== id);
     if (updatedSketches.length === 0) {
       const newId = Date.now().toString();
-      updatedSketches.push({ id: newId, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: [] });
+      updatedSketches.push({ id: newId, seriesTitle: '', title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: [] });
       setActiveSketchId(newId);
     } else if (activeSketchId === id) setActiveSketchId(updatedSketches[0].id);
     
@@ -517,12 +490,9 @@ const App = () => {
       ...sketchToClone,
       id: newId,
       title: `${sketchToClone.title} (Ep 2)`,
-      premise: '', // Clear episode specific stuff
-      hook: '',
-      escalation: '',
-      ending: '',
-      script: '',
-      punchUpNotes: []
+      premise: '', hook: '', escalation: '', ending: '', script: '', punchUpNotes: [],
+      props: [], // Wipe props explicitly 
+      characterProfiles: sketchToClone.characterProfiles.filter(c => c.isLocked) // Retain ONLY locked cast
     };
     
     setSketches(prev => [...prev, clonedSketch]);
@@ -533,11 +503,8 @@ const App = () => {
       setIsSyncing(true);
       try {
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', newId), clonedSketch);
-      } catch (err) {
-        console.error("Failed to clone sketch to cloud", err);
-      } finally {
-        setIsSyncing(false);
-      }
+      } catch (err) { console.error("Failed to clone sketch to cloud", err); } 
+      finally { setIsSyncing(false); }
     }
   };
 
@@ -630,7 +597,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "8.2", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "8.3", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -641,7 +608,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "8.2", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "8.3", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -698,7 +665,7 @@ const App = () => {
 
   const downloadShootPlan = () => {
     if (!shootPlan || shootPlan.length === 0) return;
-    const safeTitle = activeSketch?.title?.toUpperCase() || 'UNTITLED';
+    const safeTitle = getFullTitle().toUpperCase() || 'UNTITLED';
     let planText = `SHOOT PLAN: ${safeTitle}\n=========================================\n\nCHARACTERS: ${availableCharacters.join(', ') || 'N/A'}\nPROPS: ${activePropsList.join(', ') || 'N/A'}\n\n=========================================\n\n`;
     
     let currentHeading = '';
@@ -795,7 +762,7 @@ const App = () => {
       ? shot.shotCharacters.map(n => {
           const profile = activeProfiles.find(p => p.name === n);
           if (!profile) return n;
-          return `${n} (A ${profile.age} year old ${profile.sex || 'person'}, ${getGenderText(profile.gender || 50)}, ${getSkinText(profile.melanin || 50)}. Visual traits: ${profile.desc || ''})`;
+          return `${n} (A ${profile.age} year old ${profile.sex || 'person'}, ${getGenderText(profile.gender || 50)}, ${getSkinText(profile.melanin || 50)}. Visuals: ${profile.visualStyle || profile.desc || ''}. Personality: ${profile.personality || ''})`;
         }).join(', ') 
       : "";
 
@@ -916,7 +883,7 @@ const App = () => {
               img.src = fallbackUrl;
             };
             reader.readAsDataURL(blob);
-            break; // Exit the Google retry loop since the free fallback succeeded
+            break; 
           }
 
           if (i === maxRetries - 1) {
@@ -936,7 +903,7 @@ const App = () => {
     
     setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: true }));
     const char = activeProfiles.find(c => c.id === charId);
-    const promptText = `A close-up cinematic headshot photograph of a ${char.age} year old ${char.sex || 'person'} with ${getSkinText(char.melanin)} who is ${getGenderText(char.gender)}. Vibe/Archetype: ${char.archetype}. Details: ${char.desc}. Plain neutral background. Highly detailed, photorealistic.`;
+    const promptText = `A close-up cinematic headshot photograph of a ${char.age} year old ${char.sex || 'person'} with ${getSkinText(char.melanin)} who is ${getGenderText(char.gender)}. Vibe/Archetype: ${char.archetype}. Visuals: ${char.visualStyle}. Personality: ${char.personality}. Plain neutral background. Highly detailed, photorealistic.`;
 
     const maxRetries = 6; let delay = 3000;
     try {
@@ -992,7 +959,7 @@ const App = () => {
                 img.src = reader.result;
              };
              reader.readAsDataURL(blob);
-             break; // Exit the Google retry loop
+             break; 
           }
 
           if (i === maxRetries - 1) {
@@ -1019,7 +986,7 @@ const App = () => {
         "genre": "Must be one of: ${GENRES.join(', ')}",
         "tone": "Must be one of: ${TONES.join(', ')}",
         "props": ["Array", "of", "key", "physical", "props", "mentioned"],
-        "newCharacters": [ { "name": "Name", "sex": "Male|Female|Intersex", "age": 30, "gender": 50, "melanin": 50, "archetype": "Must be one of: ${COMEDY_ARCHETYPES.join(', ')}", "desc": "1 brief sentence" } ]
+        "newCharacters": [ { "name": "Name", "sex": "Male|Female|Intersex", "age": 30, "gender": 50, "melanin": 50, "archetype": "Must be one of: ${COMEDY_ARCHETYPES.join(', ')}", "visualStyle": "1 brief sentence on wardrobe", "personality": "1 brief sentence on flaw" } ]
       }`;
       const result = await callGemini(`SCRIPT TEXT:\n${rawImportScript}`, systemPrompt, true);
       
@@ -1073,7 +1040,7 @@ const App = () => {
       Return a JSON object: 
       {
         "sceneHeading": "INT. LOCATION - DAY",
-        "newCharacters": [ { "name": "Name", "sex": "Male|Female|Intersex", "age": 30, "gender": 50, "melanin": 50, "archetype": "Must be one of: ${COMEDY_ARCHETYPES.join(', ')}", "desc": "1 brief sentence" } ],
+        "newCharacters": [ { "name": "Name", "sex": "Male|Female|Intersex", "age": 30, "gender": 50, "melanin": 50, "archetype": "Must be one of: ${COMEDY_ARCHETYPES.join(', ')}", "visualStyle": "1 brief sentence", "personality": "1 brief sentence" } ],
         "shots": [ { "type": "(Must be one of: ${typeList})", "cameraMove": "(Must be one of: ${cameraMoveList})", "duration": 5, "subject": "Subject", "action": "Action blocking", "dialogue": "Brief dialogue", "shotCharacters": ["Name1", "Name2"] } ]
       }
       Note: duration is your estimated runtime for that shot in seconds. Make sure to assign a dynamic and appropriate cameraMove from the list provided.`;
@@ -1134,7 +1101,7 @@ const App = () => {
   const extractCharacters = async () => {
     setLoadingStates(prev => ({ ...prev, extractChars: true }));
     try {
-      const systemPrompt = `Analyze the scene premise, hook, escalation, and ending. Identify distinct characters mentioned. Return a JSON array of objects with keys: "name" (string), "sex" (Male, Female, or Intersex), "age" (number 1-100), "gender" (number 0-100, 0=femme, 100=masc), "melanin" (number 0-100, 0=light, 100=dark), "archetype" (Must be one of: ${COMEDY_ARCHETYPES.join(', ')}), "desc" (1 short punchy sentence). Do not invent characters not implied by the text.`;
+      const systemPrompt = `Analyze the scene premise, hook, escalation, and ending. Identify distinct characters mentioned. Return a JSON array of objects with keys: "name" (string), "sex" (Male, Female, or Intersex), "age" (number 1-100), "gender" (number 0-100, 0=femme, 100=masc), "melanin" (number 0-100, 0=light, 100=dark), "archetype" (Must be one of: ${COMEDY_ARCHETYPES.join(', ')}), "visualStyle" (1 short sentence on wardrobe/looks), "personality" (1 short sentence on flaws). Do not invent characters not implied by the text.`;
       const prompt = `Series Engine: ${activeSketch.seriesPremise}\nPremise: ${activeSketch.premise}\nHook: ${activeSketch.hook}\nEscalation: ${activeSketch.escalation}\nEnding: ${activeSketch.ending}`;
       const extracted = await callGemini(prompt, systemPrompt, true);
       
@@ -1242,7 +1209,7 @@ const App = () => {
       CRITICAL INSTRUCTION: You MUST group shots together consecutively if they share the exact same 'Scene', 'Shot Type', and 'Location Caveat'. This minimizes moving the camera and lighting setups.
       Return a JSON array of objects with 'id' and 'reason'. For grouped shots, make the reason explicitly clear that it is continuing the same camera setup.`;
       
-      const prompt = `Scene: ${activeSketch?.title}\nShots: ${activeShots.map(s => `ID: ${s.id}, Scene: ${s.sceneHeading}, Type: ${s.type}, Subject: ${s.subject}, Location Caveat: ${s.locationCaveat || 'Base'}, Chars: ${(s.shotCharacters||[]).join(',')}`).join('\n')}`;
+      const prompt = `Scene: ${getFullTitle()}\nShots: ${activeShots.map(s => `ID: ${s.id}, Scene: ${s.sceneHeading}, Type: ${s.type}, Subject: ${s.subject}, Location Caveat: ${s.locationCaveat || 'Base'}, Chars: ${(s.shotCharacters||[]).join(',')}`).join('\n')}`;
       const optimizedIds = await callGemini(prompt, systemPrompt, true);
       
       if (optimizedIds && Array.isArray(optimizedIds)) {
@@ -1266,7 +1233,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, scriptGen: true }));
     try {
       const systemPrompt = `You are an expert writer specializing in ${activeSketch?.tone} scripts. Turn this shot list and outline into a formatted script. Write in PLAIN TEXT standard screenplay format. CRITICAL: DO NOT use any HTML tags like <center> or <b>. Use ALL CAPS for scene headings and character names. Use standard line breaks and spacing to format action lines and dialogue.`;
-      const prompt = `Title: ${activeSketch?.title}\nSeries Engine: ${activeSketch?.seriesPremise}\nPremise: ${activeSketch?.premise}\nTone: ${activeSketch?.tone}\nCharacter Profiles: ${richCharactersContext}\nProps: ${activePropsList.join(', ')}\n\nShot List:\n${activeShots.map(s => `SCENE: ${s.sceneHeading}\nShot ${s.number} (${s.type} - ${s.cameraMove}): ${s.subject}\nAction: ${s.action}\nNotes: ${s.notes}\nDialogue: ${s.dialogue}`).join('\n\n')}`;
+      const prompt = `Title: ${getFullTitle()}\nSeries Engine: ${activeSketch?.seriesPremise}\nPremise: ${activeSketch?.premise}\nTone: ${activeSketch?.tone}\nCharacter Profiles: ${richCharactersContext}\nProps: ${activePropsList.join(', ')}\n\nShot List:\n${activeShots.map(s => `SCENE: ${s.sceneHeading}\nShot ${s.number} (${s.type} - ${s.cameraMove}): ${s.subject}\nAction: ${s.action}\nNotes: ${s.notes}\nDialogue: ${s.dialogue}`).join('\n\n')}`;
       const scriptContent = await callGemini(prompt, systemPrompt, false);
       if (scriptContent) {
         updateSketch(activeSketchId, 'script', scriptContent);
@@ -1281,7 +1248,7 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, scriptDraft: true }));
     try {
       const systemPrompt = `You are an expert ${activeSketch?.genre || 'comedy'} writer specializing in a ${activeSketch?.tone} tone. Based on the master project configuration, draft a complete 2-3 page screenplay. Write in PLAIN TEXT standard screenplay format. CRITICAL: DO NOT use any HTML tags. Use ALL CAPS for scene headings and character names. Escalate the premise intelligently and bring the hook to a satisfying ending.`;
-      const prompt = `Title: ${activeSketch?.title}\nSeries Engine / Formula: ${activeSketch?.seriesPremise || 'N/A'}\nEpisode Premise: ${activeSketch?.premise}\nHook: ${activeSketch?.hook}\nEscalation: ${activeSketch?.escalation}\nEnding: ${activeSketch?.ending}\nCharacter Profiles: ${richCharactersContext}\nProps to feature: ${activePropsList.join(', ')}`;
+      const prompt = `Title: ${getFullTitle()}\nSeries Engine / Formula: ${activeSketch?.seriesPremise || 'N/A'}\nEpisode Premise: ${activeSketch?.premise}\nHook: ${activeSketch?.hook}\nEscalation: ${activeSketch?.escalation}\nEnding: ${activeSketch?.ending}\nCharacter Profiles: ${richCharactersContext}\nProps to feature: ${activePropsList.join(', ')}`;
       const scriptContent = await callGemini(prompt, systemPrompt, false);
       if (scriptContent) {
         updateSketch(activeSketchId, 'script', scriptContent);
@@ -1358,13 +1325,15 @@ const App = () => {
       const existingText = activeSketch[beatType] || '';
       let taskDesc = `Task: Write a new ${beatType.toUpperCase()} for the project.`;
       
-      if (existingText && beatType === 'premise') {
+      if (beatType === 'seriesPremise') {
+         taskDesc = `Task: Enhance the existing SERIES ENGINE / RECURRING FORMULA: "${existingText}". CRITICAL: Describe the overarching master formula for a recurring series. Keep it punchy, high-concept, and professional.`;
+      } else if (beatType === 'premise' && existingText) {
          taskDesc = `Task: Enhance the existing PREMISE: "${existingText}". CRITICAL: KEEP THE ORIGINAL IDEA STRICTLY INTACT. Do NOT invent unnecessary new subplots, characters, or heavy details. Just tighten it into a punchy, professional screenplay logline.`;
       } else if (existingText) {
          taskDesc = `Task: Enhance the existing ${beatType.toUpperCase()}: "${existingText}".`;
       }
       
-      const prompt = `Title: ${activeSketch?.title}\nSeries Engine: ${activeSketch?.seriesPremise}\nCharacter Profiles: ${richCharactersContext}\n${beatType !== 'premise' ? `Current Premise: ${activeSketch?.premise}\n` : ''}${taskDesc}`;
+      const prompt = `Title: ${getFullTitle()}\nSeries Engine: ${activeSketch?.seriesPremise}\nCharacter Profiles: ${richCharactersContext}\n${beatType !== 'premise' && beatType !== 'seriesPremise' ? `Current Premise: ${activeSketch?.premise}\n` : ''}${taskDesc}`;
       const newBeat = await callGemini(prompt, systemPrompt, false);
       if (newBeat) {
         setHistory(prev => ({ ...prev, [`sketch-${beatType}`]: activeSketch[beatType] || '' }));
@@ -1381,25 +1350,25 @@ const App = () => {
     }
   };
 
-  const generateCharDesc = async (charId) => {
+  const generateCharTraits = async (charId) => {
     setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: true }));
     const char = activeProfiles.find(c => c.id === charId);
     try {
-      const existing = char.desc ? `CURRENT DETAILS (YES, AND... THESE): "${char.desc}"\n` : '';
-      const prompt = `Series Engine: ${activeSketch?.seriesPremise}\nPremise: ${activeSketch?.premise}\nSketch Hook: ${activeSketch?.hook}\nCharacter Name: ${char.name}\nCharacter Tropes: ${char.archetype}, ${char.age} years old, ${char.sex || 'Person'}, ${getGenderText(char.gender)}, ${getSkinText(char.melanin)}\n${existing}Task: Write a character introduction for a screenplay. Describe what we SEE (weird physical traits, wardrobe, posture) and their fatal flaw. Max 1-2 vivid sentences.`;
-      const newDesc = await callGemini(prompt, `Expert writer (${activeSketch?.tone || 'dramatic'} tone).`, false);
-      if (newDesc) {
-        setHistory(prev => ({ ...prev, [`char-${charId}-desc`]: char.desc || '' }));
-        updateChar(charId, 'desc', newDesc.trim());
+      const prompt = `Series Engine: ${activeSketch?.seriesPremise}\nPremise: ${activeSketch?.premise}\nCharacter Name: ${char.name}\nArchetype: ${char.archetype}\nExisting Visuals: ${char.visualStyle || ''}\nExisting Personality: ${char.personality || ''}\n\nTask: Expand on this character. Return exactly this JSON: {"visualStyle": "1-2 sentences on clothing, posture, and defining physical traits", "personality": "1-2 sentences on their fatal flaw, demeanor, and comedic neuroses"}`;
+      const result = await callGemini(prompt, `Expert comedy writer.`, true);
+      if (result && result.visualStyle) {
+        setHistory(prev => ({ ...prev, [`char-${charId}-visualStyle`]: char.visualStyle || '', [`char-${charId}-personality`]: char.personality || '' }));
+        updateChar(charId, 'visualStyle', result.visualStyle);
+        updateChar(charId, 'personality', result.personality);
       }
     } catch(err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, [`char-${charId}`]: false })); }
   };
 
-  const revertCharDesc = (charId) => {
-    const key = `char-${charId}-desc`;
-    if (history[key] !== undefined) {
-      updateChar(charId, 'desc', history[key]);
-      setHistory(prev => { const h = {...prev}; delete h[key]; return h; });
+  const revertCharTraits = (charId) => {
+    if (history[`char-${charId}-visualStyle`] !== undefined) {
+      updateChar(charId, 'visualStyle', history[`char-${charId}-visualStyle`]);
+      updateChar(charId, 'personality', history[`char-${charId}-personality`]);
+      setHistory(prev => { const h = {...prev}; delete h[`char-${charId}-visualStyle`]; delete h[`char-${charId}-personality`]; return h; });
     }
   };
 
@@ -1475,10 +1444,12 @@ const App = () => {
         
         <nav className="flex-1 overflow-y-auto px-3 space-y-1 pb-4">
           <div className="text-[10px] font-black text-zinc-600 uppercase tracking-widest px-3 mb-2">My Projects</div>
-          {sketches.map(sketch => (
+          {sketches.map(sketch => {
+            const sidebarTitle = sketch.seriesTitle ? `${sketch.seriesTitle} - ${sketch.title}` : (sketch.title || 'Untitled');
+            return (
             <div key={sketch.id} className={`w-full group text-left px-3 py-2 rounded-lg flex items-center justify-between transition-colors ${activeSketchId === sketch.id ? 'bg-zinc-800 text-orange-400' : 'text-zinc-400 hover:bg-zinc-800/50'}`}>
               <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0">
-                <FileText size={16} className="shrink-0" /> <span className="truncate font-medium text-sm">{sketch.title || 'Untitled'}</span>
+                <FileText size={16} className="shrink-0" /> <span className="truncate font-medium text-sm">{sidebarTitle}</span>
               </button>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={(e) => { e.stopPropagation(); cloneSketchAsEpisode(sketch); }} className="hover:text-green-400 p-1.5" title="Duplicate as New Episode">
@@ -1492,7 +1463,8 @@ const App = () => {
                 </button>
               </div>
             </div>
-          ))}
+            )
+          })}
           <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: [] }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW PROJECT</button>
         </nav>
 
@@ -1583,7 +1555,12 @@ const App = () => {
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3 flex-1">
                     <button onClick={() => setSidebarOpen(true)} className="md:hidden text-zinc-400 hover:text-white shrink-0"><Menu size={24}/></button>
-                    <input value={activeSketch?.title || ''} onChange={(e) => updateSketch(activeSketchId, 'title', e.target.value)} className="bg-transparent text-2xl md:text-4xl font-black focus:outline-none w-full tracking-tighter truncate" placeholder="Project Title..." />
+                    <div className="flex items-center gap-2 flex-1 font-black text-2xl md:text-4xl tracking-tighter truncate text-zinc-100">
+                      {activeSketch?.seriesTitle && (
+                        <><span className="text-purple-500 truncate">{activeSketch.seriesTitle}</span> <span className="text-zinc-600">-</span></>
+                      )}
+                      <span className="truncate">{activeSketch?.title || 'Untitled'}</span>
+                    </div>
                   </div>
                 </div>
                 
@@ -1596,7 +1573,7 @@ const App = () => {
                 </div>
               </div>
               
-              {/* HORIZONTAL TAB NAVIGATION */}
+              {/* HORIZONTAL TAB NAVIGATION (Reordered Script Before Characters) */}
               <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-zinc-800/50 mt-2">
                 <button onClick={() => setViewMode('scene')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'scene' ? 'bg-orange-500 text-white shadow-lg shadow-orange-900/20' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}>
                   <Settings2 size={14}/> CONFIG
@@ -1624,19 +1601,37 @@ const App = () => {
                   <h2 className="text-xl md:text-2xl font-black uppercase tracking-tighter text-orange-500 flex items-center gap-2"><Settings2 size={24} /> Project Configuration</h2>
                 </div>
 
-                {/* PROJECT TITLE */}
-                <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
-                  <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
-                    <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> Project Title</span>
-                  </label>
-                  <input value={activeSketch?.title || ''} onChange={(e) => updateSketch(activeSketchId, 'title', e.target.value)} placeholder="Untitled Project..." className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 text-xl font-black focus:outline-none focus:border-orange-500/50 text-zinc-200" />
+                {/* TITLES GRID */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
+                    <label className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Series Title</span>
+                    </label>
+                    <input value={activeSketch?.seriesTitle || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesTitle', e.target.value)} placeholder="Series Name..." className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 text-xl font-black focus:outline-none focus:border-purple-500/50 text-zinc-200" />
+                  </div>
+                  <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
+                    <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> Episode / Sketch Title</span>
+                    </label>
+                    <input value={activeSketch?.title || ''} onChange={(e) => updateSketch(activeSketchId, 'title', e.target.value)} placeholder="Untitled Project..." className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 text-xl font-black focus:outline-none focus:border-orange-500/50 text-zinc-200" />
+                  </div>
                 </div>
 
                 {/* THE SERIES ENGINE */}
                 <div className="space-y-2 bg-zinc-900/20 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 border-dashed">
                   <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between mb-2">
                     <span className="flex items-center gap-2">Series Engine / Recurring Formula (Optional)</span>
-                    <button onClick={() => handleVoiceInput(activeSketch?.seriesPremise, (val) => updateSketch(activeSketchId, 'seriesPremise', val), 'seriesPremise')} className={`p-1.5 rounded transition-colors ${activeMicId === 'seriesPremise' ? 'bg-red-500/20 text-red-500 animate-pulse' : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => handleVoiceInput(activeSketch?.seriesPremise, (val) => updateSketch(activeSketchId, 'seriesPremise', val), 'seriesPremise')} className={`p-1.5 rounded transition-colors ${activeMicId === 'seriesPremise' ? 'bg-red-500/20 text-red-500 animate-pulse' : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
+                      {history[`sketch-seriesPremise`] !== undefined && (
+                        <button onClick={() => revertSketchField('seriesPremise')} className="p-1.5 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
+                      )}
+                      {aiEnabled && (
+                        <button onClick={() => generateNarrativeBeat('seriesPremise')} disabled={!isRealUser || isAIBusy} className="p-1.5 hover:bg-purple-500/20 rounded transition-colors disabled:opacity-50 text-purple-500 flex items-center gap-1 text-[9px]">
+                          {!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />} GENERATE
+                        </button>
+                      )}
+                    </div>
                   </label>
                   <textarea value={activeSketch?.seriesPremise || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesPremise', e.target.value)} placeholder="If this is part of a recurring series, describe the master formula here. (e.g. In every episode, two inept cops try to interrogate a completely innocent object.)" className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 md:p-6 text-sm focus:outline-none focus:border-zinc-500/50 min-h-[80px] resize-y text-zinc-400 italic" />
                 </div>
@@ -1702,7 +1697,7 @@ const App = () => {
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Master Props List</span>
                     {aiEnabled && (
-                      <button onClick={autoExtractProps} disabled={!isRealUser || isAIBusy} className="text-[9px] font-black tracking-widest px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded flex items-center gap-1 transition-colors disabled:opacity-50">
+                      <button onClick={autoExtractProps} disabled={!isRealUser || isAIBusy} className="text-[9px] font-black tracking-widest px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 rounded flex items-center gap-1.5 transition-colors disabled:opacity-50">
                         {loadingStates.extractProps ? <Loader2 size={12} className="animate-spin"/> : <Sparkles size={12}/>} AUTO-EXTRACT FROM SCRIPT
                       </button>
                     )}
@@ -1781,15 +1776,15 @@ const App = () => {
                     <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
                       {aiEnabled && (
                         <>
-                          <button onClick={draftScriptFromConfig} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-blue-900/20 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-900/50 disabled:opacity-50 rounded-full text-[10px] font-black transition-colors whitespace-nowrap">
+                          <button onClick={draftScriptFromConfig} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-6 py-2.5 bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 rounded-full text-[10px] font-black transition-colors whitespace-nowrap shadow-[0_0_15px_rgba(37,99,235,0.5)] border border-blue-400">
                             {loadingStates.scriptDraft ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)} DRAFT FROM CONFIG
                           </button>
-                          <button onClick={generateScriptFromShots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg shadow-blue-900/20 whitespace-nowrap">
+                          <button onClick={generateScriptFromShots} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 rounded-full text-[10px] font-black whitespace-nowrap shadow-[0_0_15px_rgba(79,70,229,0.5)] border border-indigo-400">
                             {loadingStates.scriptGen ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Layout size={12} />)} GEN FROM BOARD
                           </button>
                         </>
                       )}
-                      <button onClick={downloadScript} disabled={!activeSketch?.script} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2 bg-zinc-800 text-blue-400 hover:bg-zinc-700 disabled:opacity-50 rounded-full text-[10px] font-black transition-all border border-zinc-700"><Download size={12} /> SAVE PDF</button>
+                      <button onClick={downloadScript} disabled={!activeSketch?.script} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-4 py-2.5 bg-zinc-800 text-blue-400 hover:bg-zinc-700 disabled:opacity-50 rounded-full text-[10px] font-black transition-all border border-zinc-700"><Download size={12} /> SAVE PDF</button>
                     </div>
                   )}
                 </div>
@@ -1798,7 +1793,7 @@ const App = () => {
                   <div className="space-y-4">
                     <div className="bg-zinc-900/40 border border-zinc-800 rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 relative shadow-xl">
                       {aiEnabled && (
-                        <button onClick={getPunchUpNotes} disabled={!isRealUser || isAIBusy || !activeSketch?.script} className="absolute top-4 right-4 md:top-6 md:right-6 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-purple-400 disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg border border-zinc-700 flex items-center gap-2 transition-colors z-10">
+                        <button onClick={getPunchUpNotes} disabled={!isRealUser || isAIBusy || !activeSketch?.script} className="absolute top-4 right-4 md:top-6 md:right-6 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg border border-purple-400 flex items-center gap-2 transition-colors z-10 shadow-[0_0_15px_rgba(147,51,234,0.5)]">
                           {loadingStates.punchUp ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} PUNCH UP NOTES
                         </button>
                       )}
@@ -1830,7 +1825,7 @@ const App = () => {
                         
                         {selectedPunchUps.length > 0 && (
                           <div className="flex justify-end">
-                            <button onClick={implementPunchUps} disabled={loadingStates.implementNotes} className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-full text-[10px] uppercase tracking-widest font-black transition-colors shadow-lg shadow-purple-900/20 flex items-center gap-2">
+                            <button onClick={implementPunchUps} disabled={loadingStates.implementNotes} className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-full text-[10px] uppercase tracking-widest font-black transition-colors shadow-[0_0_15px_rgba(147,51,234,0.5)] border border-purple-400 flex items-center gap-2">
                               {loadingStates.implementNotes ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} IMPLEMENT {selectedPunchUps.length} NOTE{selectedPunchUps.length > 1 ? 'S' : ''}
                             </button>
                           </div>
@@ -1865,10 +1860,10 @@ const App = () => {
                             <ScrollText size={14}/> PULL FROM SCRIPT EDITOR
                           </button>
                           <div className="flex flex-col sm:flex-row justify-end gap-3 w-full lg:w-auto">
-                            <button onClick={analyzeScriptMetadata} disabled={!rawImportScript.trim() || !isRealUser || isAIBusy} className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-purple-400 font-black text-[10px] rounded-full tracking-widest transition-all flex items-center justify-center gap-2">
+                            <button onClick={analyzeScriptMetadata} disabled={!rawImportScript.trim() || !isRealUser || isAIBusy} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-[10px] rounded-full tracking-widest transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(37,99,235,0.5)] border border-blue-400">
                               {loadingStates.analyzeScript ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} 1. ANALYZE METADATA & CAST
                             </button>
-                            <button onClick={parseScriptIntoChunks} disabled={!rawImportScript.trim()} className="px-6 py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-black text-xs rounded-full tracking-widest shadow-lg shadow-purple-900/20 transition-all flex items-center justify-center gap-2">
+                            <button onClick={parseScriptIntoChunks} disabled={!rawImportScript.trim()} className="px-6 py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-black text-xs rounded-full tracking-widest transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(147,51,234,0.5)] border border-purple-400">
                               <Scissors size={14}/> 2. SLICE INTO SCENES
                             </button>
                           </div>
@@ -1921,20 +1916,25 @@ const App = () => {
                   </div>
                   <div className="flex gap-2 w-full sm:w-auto">
                     {aiEnabled && (
-                      <button onClick={extractCharacters} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center items-center gap-2 px-4 py-2.5 bg-blue-600/10 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-600/30 rounded-full text-xs font-black transition-all shadow-lg flex">
+                      <button onClick={extractCharacters} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white border border-blue-400 rounded-full text-xs font-black transition-all shadow-[0_0_15px_rgba(37,99,235,0.5)] flex">
                         {loadingStates.extractChars ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} AUTO-EXTRACT
                       </button>
                     )}
-                    <button onClick={addCharacter} className="flex-1 sm:flex-none justify-center items-center gap-2 px-6 py-2.5 bg-green-600/10 text-green-500 hover:bg-green-600 hover:text-white border border-green-600/30 rounded-full text-xs font-black transition-all shadow-lg flex"><Plus size={14} /> ADD CHARACTER</button>
+                    <button onClick={addCharacter} className="flex-1 sm:flex-none justify-center items-center gap-2 px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white border border-green-400 rounded-full text-xs font-black transition-all shadow-[0_0_15px_rgba(22,163,74,0.5)] flex"><Plus size={14} /> ADD CHARACTER</button>
                   </div>
                 </div>
                 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {activeProfiles.map(char => (
                     <div key={char.id} className="bg-zinc-900/40 border border-zinc-800 rounded-[2rem] p-6 flex flex-col gap-6 relative group transition-all hover:border-zinc-700 shadow-xl">
-                      <button onClick={() => removeChar(char.id)} className="absolute top-4 right-4 p-2 bg-zinc-950/50 rounded-full text-zinc-500 hover:text-red-400 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity border border-zinc-800 z-10 shadow-md"><Trash2 size={14} /></button>
+                      <div className="absolute top-4 right-4 flex items-center gap-2 z-10 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => updateChar(char.id, 'isLocked', !char.isLocked)} className={`p-2 rounded-full border shadow-md transition-colors ${char.isLocked ? 'bg-orange-500/20 border-orange-500 text-orange-500' : 'bg-zinc-950/50 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title={char.isLocked ? "Locked. Immune to AI overrides. Kept on duplicate." : "Unlocked. Will be overwritten by AI auto-extract."}>
+                          {char.isLocked ? <Lock size={14} /> : <Unlock size={14} />}
+                        </button>
+                        <button onClick={() => removeChar(char.id)} className="p-2 bg-zinc-950/50 rounded-full text-zinc-500 hover:text-red-400 border border-zinc-800 shadow-md"><Trash2 size={14} /></button>
+                      </div>
                       
-                      <div className="flex gap-5 items-center pr-10">
+                      <div className="flex gap-5 items-center pr-20">
                         <div className="w-20 h-20 sm:w-24 sm:h-24 bg-zinc-950 rounded-full overflow-hidden flex-shrink-0 relative group/avatar border-2 border-zinc-800 shadow-inner">
                            {char.image ? <img src={char.image} className="w-full h-full object-cover"/> : <User size={32} className="m-auto mt-6 sm:mt-8 text-zinc-700"/>}
                            <input type="file" accept="image/*" onChange={(e) => handleCharImageUpload(char.id, e)} className="hidden" id={`char-img-${char.id}`} />
@@ -1997,19 +1997,28 @@ const App = () => {
                         </div>
                       </div>
 
-                      <div className="relative mt-2">
-                        <textarea value={char.desc || ''} onChange={(e) => updateChar(char.id, 'desc', e.target.value)} placeholder="Fatal flaw, weird physical traits, strange wardrobe..." className="w-full bg-zinc-950/50 rounded-xl p-4 text-sm text-zinc-300 resize-none focus:outline-none border border-zinc-800/50 focus:border-green-500/50 h-28 leading-relaxed shadow-inner" />
-                        <div className="absolute bottom-3 right-3 flex items-center gap-1">
-                          <button onClick={() => handleVoiceInput(char.desc, (val) => updateChar(char.id, 'desc', val), `char-${char.id}`)} className={`p-1.5 bg-zinc-900 border border-zinc-700 rounded-lg transition-colors shadow-md ${activeMicId === `char-${char.id}` ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={14}/></button>
-                          {history[`char-${char.id}-desc`] !== undefined && (
-                            <button onClick={() => revertCharDesc(char.id)} className="p-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-500 hover:text-zinc-300 transition-colors shadow-md" title="Undo AI edit"><Undo size={14}/></button>
-                          )}
-                          {aiEnabled && (
-                            <button onClick={() => generateCharDesc(char.id)} disabled={!isRealUser || isAIBusy} className="p-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-green-400 transition-colors disabled:opacity-50 shadow-md" title="Generate character flaw">
-                              {loadingStates[`char-${char.id}`] ? <Loader2 size={14} className="animate-spin text-green-500" /> : (!isRealUser ? <Lock size={14} /> : <Sparkles size={14} />)}
-                            </button>
-                          )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                        <div className="relative">
+                          <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1 block">Visual Style / Wardrobe</label>
+                          <textarea value={char.visualStyle || ''} onChange={(e) => updateChar(char.id, 'visualStyle', e.target.value)} placeholder="Wardrobe, posture, defining physical traits..." className="w-full bg-zinc-950/50 rounded-xl p-4 text-xs text-zinc-300 resize-none focus:outline-none border border-zinc-800/50 focus:border-green-500/50 h-28 leading-relaxed shadow-inner" />
+                          <button onClick={() => handleVoiceInput(char.visualStyle, (val) => updateChar(char.id, 'visualStyle', val), `char-vis-${char.id}`)} className={`absolute bottom-3 right-3 p-1.5 bg-zinc-900 border border-zinc-700 rounded-lg transition-colors shadow-md ${activeMicId === `char-vis-${char.id}` ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
                         </div>
+                        <div className="relative">
+                          <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1 block">Personality / Fatal Flaw</label>
+                          <textarea value={char.personality || ''} onChange={(e) => updateChar(char.id, 'personality', e.target.value)} placeholder="Fatal flaw, demeanor, comedic neuroses..." className="w-full bg-zinc-950/50 rounded-xl p-4 text-xs text-zinc-300 resize-none focus:outline-none border border-zinc-800/50 focus:border-green-500/50 h-28 leading-relaxed shadow-inner" />
+                          <button onClick={() => handleVoiceInput(char.personality, (val) => updateChar(char.id, 'personality', val), `char-per-${char.id}`)} className={`absolute bottom-3 right-3 p-1.5 bg-zinc-900 border border-zinc-700 rounded-lg transition-colors shadow-md ${activeMicId === `char-per-${char.id}` ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
+                        </div>
+                      </div>
+                      
+                      <div className="flex justify-end gap-2 border-t border-zinc-800/50 pt-4">
+                        {history[`char-${char.id}-visualStyle`] !== undefined && (
+                          <button onClick={() => revertCharTraits(char.id)} className="p-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-500 hover:text-zinc-300 transition-colors shadow-md" title="Undo AI edit"><Undo size={14}/></button>
+                        )}
+                        {aiEnabled && (
+                          <button onClick={() => generateCharTraits(char.id)} disabled={!isRealUser || isAIBusy} className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-green-400 transition-colors disabled:opacity-50 shadow-md flex items-center gap-2" title="Generate character flaw">
+                            {loadingStates[`char-${char.id}`] ? <Loader2 size={12} className="animate-spin text-green-500" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)} AI TOUCH-UP
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -2031,8 +2040,8 @@ const App = () => {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-800 pb-4 print:hidden">
                   <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800 overflow-x-auto w-full sm:w-auto">
                     <button onClick={() => setBoardSubTab('grid')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 ${boardSubTab === 'grid' ? 'bg-zinc-100 text-black shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}><Layout size={12}/> VISUAL GRID</button>
-                    <button onClick={() => { if(shootPlan.length > 0) setBoardSubTab('shoot-plan'); else optimizeShootOrder(); }} disabled={!isRealUser && shootPlan.length === 0 || isAIBusy} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50 ${boardSubTab === 'shoot-plan' ? 'bg-yellow-500 text-black shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}>
-                      {loadingStates.optimizing ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />} 1ST AD PLAN
+                    <button onClick={() => { if(shootPlan.length > 0) setBoardSubTab('shoot-plan'); else optimizeShootOrder(); }} disabled={!isRealUser && shootPlan.length === 0 || isAIBusy} className={`px-6 py-2 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50 ${boardSubTab === 'shoot-plan' ? 'bg-yellow-500 text-black shadow-[0_0_15px_rgba(234,179,8,0.5)] border border-yellow-400' : 'bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20'}`}>
+                      {loadingStates.optimizing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} 1ST AD PLAN
                     </button>
                     <div className="w-px h-4 bg-zinc-700 mx-1 my-auto"></div>
                     <button onClick={() => setBoardSubTab('print-boards')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 ${boardSubTab === 'print-boards' ? 'bg-zinc-700 text-white shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><Printer size={12}/> BOARDS</button>
@@ -2082,7 +2091,6 @@ const App = () => {
                       const currentPrompt = getShotPrompt(shot);
                       const isPersonalKeyActive = userApiKey.trim().length > 0;
                       
-                      // Safely evaluate heading to prevent undefined errors
                       const currentHeading = shot.sceneHeading || '';
                       const previousShot = index > 0 ? activeShots[index - 1] : null;
                       const previousHeading = previousShot?.sceneHeading || '';
@@ -2406,7 +2414,7 @@ const App = () => {
 
                     <div className="max-w-6xl mx-auto space-y-8">
                       <div className="border-b-4 border-black pb-4 flex flex-col md:flex-row justify-between md:items-end gap-2">
-                        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none">{activeSketch?.title}</h1>
+                        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none">{getFullTitle()}</h1>
                         <div className="text-left md:text-right text-[10px] font-bold uppercase">{new Date().toLocaleDateString()}</div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 border-b border-black pb-4 text-sm">
