@@ -132,71 +132,69 @@ const mergeCharacters = (existingProfiles, newAICharacters) => {
   return updatedProfiles;
 };
 
-// HELPER: Upgraded Free Image Generator (CORS/Timeout proof)
-const fetchFreeImage = (promptText, width, height) => {
+// HELPER: Robust free image generator using direct Blob fetching with Exponential Backoff
+const fetchFreeImage = async (promptText, width, height) => {
+  const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim() + " cinematic, highly detailed");
+  const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
+  
+  let response;
+  for (let i = 0; i < 3; i++) {
+    try {
+      response = await fetch(url);
+      if (response.ok) break;
+      if (response.status === 429 && i < 2) {
+        await new Promise(r => setTimeout(r, 2500 * (i + 1))); // Quietly wait before retrying
+        continue;
+      }
+      if (response.status === 429) throw new Error("The Free Image server is overwhelmed right now (429). Give it a minute to cool down!");
+      throw new Error(`Server returned ${response.status}`);
+    } catch (e) {
+      if (i === 2) throw new Error("Free image generator failed to connect. Are you offline?");
+      await new Promise(r => setTimeout(r, 1500)); // Network delay backoff
+    }
+  }
+
+  const blob = await response.blob();
+  
   return new Promise((resolve, reject) => {
-    const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim() + " cinematic, highly detailed");
-    const url = `https://pollinations.ai/p/${safePrompt}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
-
-    const img = new Image();
-    img.crossOrigin = 'Anonymous';
-    
-    const timeoutId = setTimeout(() => {
-      img.src = '';
-      reject(new Error("Free Image Generator timed out. The indie server might be busy."));
-    }, 15000);
-
-    img.onload = () => {
-      clearTimeout(timeoutId);
-      const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', 0.8));
-    };
-
-    img.onerror = () => {
-      clearTimeout(timeoutId);
-      reject(new Error("Free Image Generator failed to load."));
-    };
-
-    img.src = url;
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Failed to read image blob."));
+    reader.readAsDataURL(blob);
   });
 };
 
-const fetchFreeAvatar = (promptText) => {
+const fetchFreeAvatar = async (promptText) => {
+  const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim());
+  const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=256&height=256&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
+  
+  let response;
+  for (let i = 0; i < 3; i++) {
+    try {
+      response = await fetch(url);
+      if (response.ok) break;
+      if (response.status === 429 && i < 2) {
+        await new Promise(r => setTimeout(r, 2500 * (i + 1))); 
+        continue;
+      }
+      if (response.status === 429) throw new Error("The Free Image server is overwhelmed right now (429). Give it a minute to cool down!");
+      throw new Error(`Server returned ${response.status}`);
+    } catch (e) {
+      if (i === 2) throw new Error("Free avatar generator failed to connect. Are you offline?");
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+
+  const blob = await response.blob();
+  
   return new Promise((resolve, reject) => {
-    const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim());
-    const url = `https://pollinations.ai/p/${safePrompt}?width=512&height=512&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
-
-    const img = new Image();
-    img.crossOrigin = 'Anonymous';
-    
-    const timeoutId = setTimeout(() => {
-      img.src = '';
-      reject(new Error("Free Avatar Generator timed out. The indie server might be busy."));
-    }, 15000);
-
-    img.onload = () => {
-      clearTimeout(timeoutId);
-      const canvas = document.createElement('canvas');
-      canvas.width = 256; canvas.height = 256;
-      const ctx = canvas.getContext('2d');
-      const size = Math.min(img.width, img.height);
-      const x = (img.width - size) / 2;
-      const y = (img.height - size) / 2;
-      ctx.drawImage(img, x, y, size, size, 0, 0, 256, 256);
-      resolve(canvas.toDataURL('image/jpeg', 0.8));
-    };
-
-    img.onerror = () => {
-      clearTimeout(timeoutId);
-      reject(new Error("Free Avatar Generator failed to load."));
-    };
-
-    img.src = url;
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Failed to read image blob."));
+    reader.readAsDataURL(blob);
   });
 };
+
 
 const App = () => {
   const [user, setUser] = useState(null);
@@ -228,7 +226,6 @@ const App = () => {
   const [rawImportScript, setRawImportScript] = useState('');
   const [scriptChunks, setScriptChunks] = useState([]);
 
-  // Refactored ShootPlan to be reactive
   const [shootPlanMeta, setShootPlanMeta] = useState([]); 
   const [loadingStates, setLoadingStates] = useState({});
   const [isAIBusy, setIsAIBusy] = useState(false); 
@@ -685,7 +682,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "8.7", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "8.8", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -696,7 +693,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "8.7", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "8.8", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
