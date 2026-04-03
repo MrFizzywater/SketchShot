@@ -22,12 +22,14 @@ import {
 // --- ENVIRONMENT INITIALIZATION ---
 let firebaseConfig = {};
 let globalTextModel = "gemini-flash-latest"; 
-let globalImageModel = "imagen-4.0-generate-001"; 
+let globalImageModel = "imagen-3.0-generate-001"; // Defaulted to 3.0 to prevent 404 preview blocks
+let globalFreeImageUrl = "https://image.pollinations.ai/prompt/"; // New: Default free endpoint
 
 try {
   if (typeof import.meta !== 'undefined' && import.meta.env) {
     if (import.meta.env.VITE_GEMINI_TEXT_MODEL) globalTextModel = import.meta.env.VITE_GEMINI_TEXT_MODEL;
     if (import.meta.env.VITE_GEMINI_IMAGE_MODEL) globalImageModel = import.meta.env.VITE_GEMINI_IMAGE_MODEL;
+    if (import.meta.env.VITE_FREE_IMAGE_URL) globalFreeImageUrl = import.meta.env.VITE_FREE_IMAGE_URL;
   }
 } catch (e) { /* Ignore */ }
 
@@ -134,22 +136,28 @@ const mergeCharacters = (existingProfiles, newAICharacters) => {
 
 // HELPER: Robust free image generator using direct Blob fetching with Exponential Backoff
 const fetchFreeImage = async (promptText, width, height) => {
-  const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim() + " cinematic, highly detailed");
-  const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
+  // Strip line breaks and limit length so we don't crash the Pollinations URL parser with a 500 error
+  const cleanPrompt = promptText.replace(/[\n\r]/g, ' ').substring(0, 500).trim();
+  const safePrompt = encodeURIComponent(cleanPrompt + ", cinematic, highly detailed");
+  
+  // Guarantee trailing slash for the base URL to prevent broken links
+  const baseUrl = globalFreeImageUrl.endsWith('/') ? globalFreeImageUrl : `${globalFreeImageUrl}/`;
+  const url = `${baseUrl}${safePrompt}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
   
   let response;
   for (let i = 0; i < 3; i++) {
     try {
       response = await fetch(url);
       if (response.ok) break;
-      if (response.status === 429 && i < 2) {
+      // Catch both Rate Limits (429) and Server Overloads (500+)
+      if ((response.status === 429 || response.status >= 500) && i < 2) {
         await new Promise(r => setTimeout(r, 2500 * (i + 1))); // Quietly wait before retrying
         continue;
       }
       if (response.status === 429) throw new Error("The Free Image server is overwhelmed right now (429). Give it a minute to cool down!");
       throw new Error(`Server returned ${response.status}`);
     } catch (e) {
-      if (i === 2) throw new Error("Free image generator failed to connect. Are you offline?");
+      if (i === 2) throw new Error(`Free image generator failed to connect to ${baseUrl}. Check your Coolify variables.`);
       await new Promise(r => setTimeout(r, 1500)); // Network delay backoff
     }
   }
@@ -165,22 +173,26 @@ const fetchFreeImage = async (promptText, width, height) => {
 };
 
 const fetchFreeAvatar = async (promptText) => {
-  const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim());
-  const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=256&height=256&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
+  const cleanPrompt = promptText.replace(/[\n\r]/g, ' ').substring(0, 500).trim();
+  const safePrompt = encodeURIComponent(cleanPrompt);
+  
+  // Guarantee trailing slash
+  const baseUrl = globalFreeImageUrl.endsWith('/') ? globalFreeImageUrl : `${globalFreeImageUrl}/`;
+  const url = `${baseUrl}${safePrompt}?width=256&height=256&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
   
   let response;
   for (let i = 0; i < 3; i++) {
     try {
       response = await fetch(url);
       if (response.ok) break;
-      if (response.status === 429 && i < 2) {
+      if ((response.status === 429 || response.status >= 500) && i < 2) {
         await new Promise(r => setTimeout(r, 2500 * (i + 1))); 
         continue;
       }
       if (response.status === 429) throw new Error("The Free Image server is overwhelmed right now (429). Give it a minute to cool down!");
       throw new Error(`Server returned ${response.status}`);
     } catch (e) {
-      if (i === 2) throw new Error("Free avatar generator failed to connect. Are you offline?");
+      if (i === 2) throw new Error(`Free avatar generator failed to connect to ${baseUrl}. Check your Coolify variables.`);
       await new Promise(r => setTimeout(r, 1500));
     }
   }
@@ -682,7 +694,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "8.8", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "8.9", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -693,7 +705,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "8.8", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "8.9", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -893,13 +905,12 @@ const App = () => {
         const aspectMap = { '16:9': {w: 800, h: 450}, '1:1': {w: 512, h: 512}, '4:3': {w: 800, h: 600}, '9:16': {w: 450, h: 800}, '3:4': {w: 600, h: 800} };
         const dims = aspectMap[activeSketch?.aspectRatio || '16:9'];
         
-        // Strip out the massive Gemini system prompt to prevent URL length 500 errors
         let freeStyle = activeSketch?.imageStyle || 'Storyboard sketch';
         if (freeStyle === 'Stick Figure') freeStyle = 'Simple literal stick figure drawing on white paper, stickman, stick figures';
         const charContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.visualStyle || n).join(', ') : "";
         const freePrompt = `Art style: ${freeStyle}. ${shot.type} shot of ${shot.subject}, ${shot.action}. Location: ${shot.sceneHeading}. ${charContext}`;
         
-        const resultUrl = await fetchPollinationsImage(freePrompt, dims.w, dims.h);
+        const resultUrl = await fetchFreeImage(freePrompt, dims.w, dims.h);
         setFullResImages(prev => ({ ...prev, [shotId]: resultUrl }));
         updateShot(shotId, 'image', resultUrl);
       } catch (err) {
@@ -965,7 +976,7 @@ const App = () => {
           break; 
         } catch (error) {
           if (error.message === "404_MODEL_NOT_FOUND") {
-             alert(`Google returned a 404 error. Your API key likely doesn't have access to '${globalImageModel}'.\n\nFix: Change your VITE_GEMINI_IMAGE_MODEL in Coolify to 'imagen-3.0-generate-001', or toggle on the Free Image Generator in the sidebar.`);
+             alert(`Google returned a 404 error. Your API key likely doesn't have access to '${globalImageModel}' yet.\n\nFix: I've updated the default to 'imagen-3.0-generate-001'. Check Coolify to ensure VITE_GEMINI_IMAGE_MODEL is set to that, or toggle on the Free Image Generator in the sidebar.`);
              break;
           }
           if (error.message === "FREE_TIER") {
@@ -981,7 +992,7 @@ const App = () => {
             const charContext = shot.shotCharacters?.length > 0 ? shot.shotCharacters.map(n => activeProfiles.find(p => p.name === n)?.visualStyle || n).join(', ') : "";
             const freePrompt = `Art style: ${freeStyle}. ${shot.type} shot of ${shot.subject}, ${shot.action}. Location: ${shot.sceneHeading}. ${charContext}`;
             
-            const resultUrl = await fetchPollinationsImage(freePrompt, dims.w, dims.h);
+            const resultUrl = await fetchFreeImage(freePrompt, dims.w, dims.h);
             setFullResImages(prev => ({ ...prev, [shotId]: resultUrl }));
             updateShot(shotId, 'image', resultUrl);
             break; 
@@ -1005,7 +1016,6 @@ const App = () => {
     setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: true }));
     const char = activeProfiles.find(c => c.id === charId);
     
-    // HEAVILY WEIGHTED VISUAL STYLE PROMPT (Swapped to "Portrait" to avoid tight face cropping)
     const promptText = `A cinematic portrait photograph focusing heavily on WARDROBE: The subject is wearing ${char.visualStyle || 'everyday clothes'}. They are a ${char.age} year old ${char.sex || 'person'}, ${getSkinText(char.melanin)}, ${getGenderText(char.gender)}. Their facial expression shows their personality: ${char.personality || char.archetype}. Plain neutral background. Photorealistic, highly detailed.`;
 
     if (useFreeImageGen) {
@@ -1051,7 +1061,7 @@ const App = () => {
           break; 
         } catch (error) {
           if (error.message === "404_MODEL_NOT_FOUND") {
-             alert(`Google returned a 404 error. Your API key likely doesn't have access to '${globalImageModel}'.\n\nFix: Change your VITE_GEMINI_IMAGE_MODEL in Coolify to 'imagen-3.0-generate-001', or toggle on the Free Image Generator in the sidebar.`);
+             alert(`Google returned a 404 error. Your API key likely doesn't have access to '${globalImageModel}' yet.\n\nFix: I've updated the default to 'imagen-3.0-generate-001'. Check Coolify to ensure VITE_GEMINI_IMAGE_MODEL is set to that, or toggle on the Free Image Generator in the sidebar.`);
              break;
           }
           if (error.message === "FREE_TIER") {
@@ -2194,7 +2204,7 @@ const App = () => {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-800 pb-4 print:hidden">
                   <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800 overflow-x-auto w-full sm:w-auto">
                     <button onClick={() => setBoardSubTab('grid')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 ${boardSubTab === 'grid' ? 'bg-zinc-100 text-black shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}><Layout size={12}/> VISUAL GRID</button>
-                    <button onClick={() => { if(shootPlan.length > 0) setBoardSubTab('shoot-plan'); else optimizeShootOrder(); }} disabled={!isRealUser && shootPlan.length === 0 || isAIBusy} className={`px-6 py-2 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50 ${boardSubTab === 'shoot-plan' ? 'bg-yellow-500 text-black shadow-[0_0_15px_rgba(234,179,8,0.5)] border border-yellow-400' : 'bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20'}`}>
+                    <button onClick={() => { if(shootPlanMeta.length > 0) setBoardSubTab('shoot-plan'); else optimizeShootOrder(); }} disabled={!isRealUser && shootPlanMeta.length === 0 || isAIBusy} className={`px-6 py-2 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50 ${boardSubTab === 'shoot-plan' ? 'bg-yellow-500 text-black shadow-[0_0_15px_rgba(234,179,8,0.5)] border border-yellow-400' : 'bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20'}`}>
                       {loadingStates.optimizing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} 1ST AD PLAN
                     </button>
                     <div className="w-px h-4 bg-zinc-700 mx-1 my-auto"></div>
