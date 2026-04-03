@@ -24,7 +24,6 @@ let firebaseConfig = {};
 let globalTextModel = "gemini-flash-latest"; 
 let globalImageModel = "imagen-4.0-generate-001"; 
 
-// 1. Decouple AI Models: Force the rig to ALWAYS listen to Coolify's environment variables first
 try {
   if (typeof import.meta !== 'undefined' && import.meta.env) {
     if (import.meta.env.VITE_GEMINI_TEXT_MODEL) globalTextModel = import.meta.env.VITE_GEMINI_TEXT_MODEL;
@@ -32,7 +31,6 @@ try {
   }
 } catch (e) { /* Ignore */ }
 
-// 2. Initialize Firebase
 if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 } else {
@@ -55,11 +53,21 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchbeans-app';
 
 const SHOT_TYPES = ['Wide', 'Medium', 'Close Up', 'POV', 'Over the Shoulder', 'Insert', 'Drone', 'Tracking'];
 const CAMERA_MOVES = ['Locked Off', 'Handheld / Shaky', 'Slow Creep In', 'Slow Creep Out', 'Crash Zoom', 'Whip Pan', 'Dolly Tracking', 'Dutch Angle', 'Crane Up', 'Crane Down'];
-const IMAGE_STYLES = ['Pencil Sketch', 'Photographic', 'Cinematic', 'Comic Book', 'Watercolor', '3D Render', 'Vintage Film', 'Other'];
+const IMAGE_STYLES = ['Pencil Sketch', 'Stick Figure', 'Photographic', 'Cinematic', 'Comic Book', 'Watercolor', '3D Render', 'Vintage Film', 'Other'];
 const ASPECT_RATIOS = [{label: '16:9 (Widescreen)', val: '16:9'}, {label: '1:1 (Square)', val: '1:1'}, {label: '4:3 (Standard)', val: '4:3'}, {label: '9:16 (Vertical)', val: '9:16'}, {label: '3:4 (Portrait)', val: '3:4'}];
 const GENRES = ['Comedy', 'Horror', 'Sci-Fi', 'Drama', 'Thriller', 'Action', 'Documentary', 'Commercial', 'Music Video', 'Other'];
 const TONES = ['Absurdist', 'Disruptive / Cringe', 'Deadpan', 'Slapstick', 'Satire', 'Surreal', 'Mockumentary', 'Cinematic', 'Dark Comedy', 'Screwball', 'High Concept', 'Mumblecore', 'Gritty', 'Melancholic', 'Uplifting', 'Tense / Thriller', 'Ethereal', 'Noir', 'Whimsical', 'Macabre', 'None', 'Other'];
 const COMEDY_ARCHETYPES = ['The Protagonist', 'The Antagonist', 'The Mentor', 'The Sidekick', 'The Innocent', 'The Everyman', 'The Weirdo', 'The Bureaucrat', 'The Straight Man', 'The Wildcard', 'The Neurotic', 'The Himbo / Bimbo', 'The Agent of Chaos', 'The Deadpan', 'The Instigator', 'The Oblivious One', 'The Cynic', 'The Over-Enthusiast', 'The Voice of Reason', 'The Fall Guy', 'None', 'Other'];
+
+const SHOT_COLORS = [
+  { name: 'none', bg: 'bg-zinc-900/40', border: 'border-zinc-800', listRow: '' },
+  { name: 'red', bg: 'bg-red-950/30', border: 'border-red-500/30', listRow: 'border-l-[6px] border-l-red-500 bg-red-50/50 print:bg-red-50' },
+  { name: 'orange', bg: 'bg-orange-950/30', border: 'border-orange-500/30', listRow: 'border-l-[6px] border-l-orange-500 bg-orange-50/50 print:bg-orange-50' },
+  { name: 'yellow', bg: 'bg-yellow-950/30', border: 'border-yellow-500/30', listRow: 'border-l-[6px] border-l-yellow-500 bg-yellow-50/50 print:bg-yellow-50' },
+  { name: 'green', bg: 'bg-green-950/30', border: 'border-green-500/30', listRow: 'border-l-[6px] border-l-green-500 bg-green-50/50 print:bg-green-50' },
+  { name: 'blue', bg: 'bg-blue-950/30', border: 'border-blue-500/30', listRow: 'border-l-[6px] border-l-blue-500 bg-blue-50/50 print:bg-blue-50' },
+  { name: 'purple', bg: 'bg-purple-950/30', border: 'border-purple-500/30', listRow: 'border-l-[6px] border-l-purple-500 bg-purple-50/50 print:bg-purple-50' },
+];
 
 const getGenderText = (val) => {
   if (val < 35) return "Femme-presenting";
@@ -193,7 +201,7 @@ const App = () => {
     ], hook: 'The Director is staring at a blank page.', escalation: 'They open SketchBeans.', ending: 'They get some sleep.', script: '', punchUpNotes: []
   }]);
   const [shots, setShots] = useState([
-    { id: 's1', sketchId: '1', number: 1, type: 'Wide', cameraMove: 'Locked Off', duration: 8, subject: 'THE DASHBOARD', action: 'Welcome to SketchBeans! The key details of your sketch live right up there under the title. \n\nClick the "SCENE CONFIG" tab to change your location, comedic tone, and visual style.', notes: 'Keep the premise simple. The AI uses it to build everything else.', dialogue: '', fx: false, image: null, sceneHeading: 'INT. THE EDIT BAY - NIGHT', shotCharacters: [] }
+    { id: 's1', sketchId: '1', number: 1, type: 'Wide', cameraMove: 'Locked Off', duration: 8, subject: 'THE DASHBOARD', action: 'Welcome to SketchBeans! The key details of your sketch live right up there under the title. \n\nClick the "SCENE CONFIG" tab to change your location, comedic tone, and visual style.', notes: 'Keep the premise simple. The AI uses it to build everything else.', dialogue: '', fx: false, image: null, sceneHeading: 'INT. THE EDIT BAY - NIGHT', shotCharacters: [], colorGroup: 'none' }
   ]);
 
   const [activeSketchId, setActiveSketchId] = useState(localStorage.getItem('sketchbeans_active_sketch') || '1');
@@ -207,7 +215,8 @@ const App = () => {
   const [rawImportScript, setRawImportScript] = useState('');
   const [scriptChunks, setScriptChunks] = useState([]);
 
-  const [shootPlan, setShootPlan] = useState([]);
+  // Refactored ShootPlan to be reactive
+  const [shootPlanMeta, setShootPlanMeta] = useState([]); 
   const [loadingStates, setLoadingStates] = useState({});
   const [isAIBusy, setIsAIBusy] = useState(false); 
   const [zoomedImage, setZoomedImage] = useState(null);
@@ -244,8 +253,12 @@ const App = () => {
   const activeShots = shots.filter(s => s.sketchId === activeSketchId).sort((a, b) => a.number - b.number);
   
   let currentDisplayList = activeShots;
-  if (boardSubTab === 'shoot-plan' && shootPlan.length > 0) currentDisplayList = shootPlan;
-  if (boardSubTab === 'print-list' && printListMode === 'shoot-plan' && shootPlan.length > 0) currentDisplayList = shootPlan;
+  if ((boardSubTab === 'shoot-plan' || (boardSubTab === 'print-list' && printListMode === 'shoot-plan')) && shootPlanMeta.length > 0) {
+    currentDisplayList = shootPlanMeta.map((meta, idx) => {
+      const foundShot = activeShots.find(s => s.id === meta.id);
+      return foundShot ? { ...foundShot, shootOrderNumber: idx + 1, optimizationReason: meta.reason } : null;
+    }).filter(s => s !== null);
+  }
   
   const totalDurationSeconds = activeShots.reduce((acc, shot) => acc + (parseInt(shot.duration) || 0), 0);
   const activePropsList = Array.isArray(activeSketch?.props) ? activeSketch.props : (activeSketch?.props ? String(activeSketch.props).split(',').map(s => s.trim()).filter(s => s) : []);
@@ -459,7 +472,7 @@ const App = () => {
   const addShot = () => {
     const nextNumber = activeShots.length > 0 ? Math.max(...activeShots.map(s => s.number)) + 1 : 1;
     const lastHeading = activeShots.length > 0 ? activeShots[activeShots.length - 1].sceneHeading : 'INT. LOCATION - DAY';
-    updateContextState(prev => [...prev, { id: Date.now().toString(), sketchId: activeSketchId, number: nextNumber, type: 'Medium', cameraMove: 'Locked Off', duration: 5, subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, sceneHeading: lastHeading, shotCharacters: [] }], false);
+    updateContextState(prev => [...prev, { id: Date.now().toString(), sketchId: activeSketchId, number: nextNumber, type: 'Medium', cameraMove: 'Locked Off', duration: 5, subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, sceneHeading: lastHeading, shotCharacters: [], colorGroup: 'none' }], false);
   };
   
   const insertShotAt = (index, position) => {
@@ -468,7 +481,7 @@ const App = () => {
     const inheritedHeading = currentActiveShots[index]?.sceneHeading || 'INT. LOCATION - DAY';
     const newShot = { 
       id: Date.now().toString(), sketchId: activeSketchId, type: 'Medium', cameraMove: 'Locked Off', duration: 5,
-      subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, sceneHeading: inheritedHeading, shotCharacters: [] 
+      subject: '', action: '', notes: '', dialogue: '', fx: false, image: null, sceneHeading: inheritedHeading, shotCharacters: [], colorGroup: 'none' 
     };
     currentActiveShots.splice(insertIndex, 0, newShot);
     currentActiveShots.forEach((s, i) => s.number = i + 1);
@@ -659,7 +672,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "8.5", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "8.6", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -670,7 +683,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "8.5", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "8.6", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -726,22 +739,22 @@ const App = () => {
   };
 
   const downloadShootPlan = () => {
-    if (!shootPlan || shootPlan.length === 0) return;
+    if (!currentDisplayList || currentDisplayList.length === 0) return;
     const safeTitle = getFullTitle().toUpperCase() || 'UNTITLED';
     let planText = `SHOOT PLAN: ${safeTitle}\n=========================================\n\nCHARACTERS: ${availableCharacters.join(', ') || 'N/A'}\nPROPS: ${activePropsList.join(', ') || 'N/A'}\n\n=========================================\n\n`;
     
     let currentHeading = '';
-    shootPlan.forEach((shot, index) => {
+    currentDisplayList.forEach((shot, index) => {
       const headingText = shot.sceneHeading || 'LOCATION';
       if (headingText !== currentHeading) {
         planText += `\n[ SCENE: ${headingText.toUpperCase()} ]\n-----------------------------------------\n`;
         currentHeading = headingText;
       }
       
-      const isNewScene = index === 0 || shot.sceneHeading !== shootPlan[index - 1].sceneHeading;
+      const isNewScene = index === 0 || shot.sceneHeading !== currentDisplayList[index - 1].sceneHeading;
       const isSameSetup = !isNewScene && index > 0 && 
-          shot.type === shootPlan[index - 1].type && 
-          (shot.locationCaveat || '') === (shootPlan[index - 1].locationCaveat || '');
+          shot.type === currentDisplayList[index - 1].type && 
+          (shot.locationCaveat || '') === (currentDisplayList[index - 1].locationCaveat || '');
 
       planText += `${index + 1}. [${(shot.type || 'Shot').toUpperCase()}] ${(shot.subject || '').toUpperCase()}${isSameSetup ? ' (↳ SAME SETUP)' : ''}\n`;
       if (!isSameSetup && shot.cameraMove) planText += `   Camera Move: ${shot.cameraMove}\n`;
@@ -838,6 +851,7 @@ const App = () => {
     else if (style === 'Watercolor') stylePrefix = "Expressive watercolor painting, loose artistic brush strokes.";
     else if (style === '3D Render') stylePrefix = "High-quality 3D render, stylized but detailed, Unreal Engine style.";
     else if (style === 'Vintage Film') stylePrefix = "Vintage 35mm film still, grainy, retro color grading, nostalgic aesthetic.";
+    else if (style === 'Stick Figure') stylePrefix = "Very simple, literal hand-drawn stick figure storyboard sketch on white paper. No background details. Just stick figures.";
     else if (style === 'Other') stylePrefix = activeSketch?.customImageStyle || "Concept art";
     else stylePrefix = "Rough storyboard sketch, mixed media graphite and colored pencil.";
 
@@ -857,7 +871,7 @@ const App = () => {
 
   const generateImage = async (shotId) => {
     const activeKey = userApiKey.trim();
-    if (!activeKey) return alert("API Key missing! Please enter your personal Gemini API key in the sidebar Settings panel.");
+    if (!activeKey && !useFreeImageGen) return alert("API Key missing! Please enter your personal Gemini API key in the sidebar Settings panel.");
     
     setLoadingStates(prev => ({ ...prev, [`image-${shotId}`]: true }));
     const shot = activeShots.find(s => s.id === shotId);
@@ -939,11 +953,13 @@ const App = () => {
 
   const generateCharAvatar = async (charId) => {
     const activeKey = userApiKey.trim();
-    if (!activeKey) return alert("API Key missing! Please enter your personal Gemini API key in the sidebar Settings panel.");
+    if (!activeKey && !useFreeImageGen) return alert("API Key missing! Please enter your personal Gemini API key in the sidebar Settings panel.");
     
     setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: true }));
     const char = activeProfiles.find(c => c.id === charId);
-    const promptText = `A close-up cinematic headshot photograph of a ${char.age} year old ${char.sex || 'person'} with ${getSkinText(char.melanin)} who is ${getGenderText(char.gender)}. Vibe/Archetype: ${char.archetype}. Visuals: ${char.visualStyle}. Personality: ${char.personality}. Plain neutral background. Highly detailed, photorealistic.`;
+    
+    // HEAVILY WEIGHTED VISUAL STYLE PROMPT
+    const promptText = `A close-up cinematic headshot photograph of a ${char.age} year old ${char.sex || 'person'} with ${getSkinText(char.melanin)} who is ${getGenderText(char.gender)}. They are dressed and styled specifically as: "${char.visualStyle}". Their overall vibe/personality is: "${char.personality}" (${char.archetype} archetype). Plain neutral background. Highly detailed, photorealistic.`;
 
     if (useFreeImageGen) {
       try {
@@ -1109,7 +1125,8 @@ const App = () => {
               sceneHeading: result.sceneHeading || chunk.heading || 'INT. UNKNOWN - DAY', 
               cameraMove: CAMERA_MOVES.includes(s.cameraMove) ? s.cameraMove : 'Locked Off', 
               duration: parseInt(s.duration) || 5,
-              shotCharacters: Array.isArray(s.shotCharacters) ? s.shotCharacters : [] 
+              shotCharacters: Array.isArray(s.shotCharacters) ? s.shotCharacters : [],
+              colorGroup: 'none'
             }));
             
             return [...prev, ...newShotsData];
@@ -1199,7 +1216,8 @@ const App = () => {
             sceneHeading: s.sceneHeading || lastHeading, 
             cameraMove: CAMERA_MOVES.includes(s.cameraMove) ? s.cameraMove : 'Locked Off', 
             duration: parseInt(s.duration) || 5,
-            shotCharacters: Array.isArray(s.shotCharacters) ? s.shotCharacters : [] 
+            shotCharacters: Array.isArray(s.shotCharacters) ? s.shotCharacters : [],
+            colorGroup: 'none'
           }));
           return [...prev, ...newShots];
         }, false);
@@ -1232,7 +1250,8 @@ const App = () => {
             sceneHeading: newShotData.sceneHeading || lastHeading, 
             cameraMove: CAMERA_MOVES.includes(newShotData.cameraMove) ? newShotData.cameraMove : 'Locked Off',
             duration: parseInt(newShotData.duration) || 5,
-            shotCharacters: Array.isArray(newShotData.shotCharacters) ? newShotData.shotCharacters : []
+            shotCharacters: Array.isArray(newShotData.shotCharacters) ? newShotData.shotCharacters : [],
+            colorGroup: 'none'
           };
           return [...prev, newShot];
         }, false);
@@ -1240,8 +1259,7 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, singleAIShot: false })); }
   };
 
-  const optimizeShootOrder = async (isPrintList = false) => {
-    const printTrigger = typeof isPrintList === 'boolean' ? isPrintList : false;
+  const optimizeShootOrder = async () => {
     setLoadingStates(prev => ({ ...prev, optimizing: true }));
     try {
       const systemPrompt = `Expert 1st AD. Reorder shots into the most efficient SHOOT ORDER. 
@@ -1252,18 +1270,8 @@ const App = () => {
       const optimizedIds = await callGemini(prompt, systemPrompt, true);
       
       if (optimizedIds && Array.isArray(optimizedIds)) {
-        setShootPlan(
-          optimizedIds.map((item, idx) => {
-            const foundShot = activeShots.find(s => s.id === item.id);
-            return foundShot ? { ...foundShot, shootOrderNumber: idx + 1, optimizationReason: item.reason } : null;
-          }).filter(s => s !== null) 
-        );
-        
-        if (printTrigger) {
-          setPrintListMode('shoot-plan');
-        } else {
-          setBoardSubTab('shoot-plan');
-        }
+        setShootPlanMeta(optimizedIds);
+        setBoardSubTab('shoot-plan');
       }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, optimizing: false })); }
   };
@@ -1413,6 +1421,12 @@ const App = () => {
     }
   };
 
+  // Helper for auto-resizing textareas in the List Views
+  const handleAutoResize = (e) => {
+    e.target.style.height = 'auto';
+    e.target.style.height = e.target.scrollHeight + 'px';
+  };
+
   const gridColsClass = {
     1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4',
   }[boardCols] || 'grid-cols-2';
@@ -1424,6 +1438,9 @@ const App = () => {
   return (
     <div className="flex h-screen w-full bg-zinc-950 text-zinc-100 font-sans selection:bg-orange-500/30 overflow-hidden relative print:block print:h-auto print:overflow-visible print:bg-white">
       
+      {/* Hide scrollbars class injection */}
+      <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
+
       {!isRealUser && !isGuest && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-500">
           <div className="max-w-sm w-full p-8 bg-zinc-900 border border-zinc-800 rounded-[3rem] text-center space-y-8 shadow-2xl relative overflow-hidden">
@@ -1484,10 +1501,10 @@ const App = () => {
             const sidebarTitle = sketch.seriesTitle ? `${sketch.seriesTitle} - ${sketch.title}` : (sketch.title || 'Untitled');
             return (
             <div key={sketch.id} className={`w-full group text-left px-3 py-2 rounded-lg flex items-center justify-between transition-colors ${activeSketchId === sketch.id ? 'bg-zinc-800 text-orange-400' : 'text-zinc-400 hover:bg-zinc-800/50'}`}>
-              <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0">
-                <FileText size={16} className="shrink-0" /> <span className="truncate font-medium text-sm">{sidebarTitle}</span>
+              <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0 overflow-x-hidden hover:overflow-x-auto scrollbar-hide whitespace-nowrap" title={sidebarTitle}>
+                <FileText size={16} className="shrink-0" /> <span className="font-medium text-sm">{sidebarTitle}</span>
               </button>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2 shrink-0 bg-gradient-to-r from-transparent to-zinc-900">
                 <button onClick={(e) => { e.stopPropagation(); cloneSketchAsEpisode(sketch); }} className="hover:text-green-400 p-1.5" title="Duplicate as New Episode">
                   <Copy size={14} />
                 </button>
@@ -1520,21 +1537,26 @@ const App = () => {
             </div>
             
             {aiEnabled && (
-              <div className="flex items-center justify-between mt-4">
-                <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-1">
-                  <ImageIcon size={12}/> Free Image Gen
-                </span>
-                <button 
-                  onClick={() => {
-                    const newState = !useFreeImageGen;
-                    setUseFreeImageGen(newState);
-                    localStorage.setItem('sb_free_img', newState.toString());
-                  }}
-                  className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${useFreeImageGen ? 'bg-blue-500' : 'bg-zinc-700'}`}
-                >
-                  <span className={`inline-block h-2 w-2 transform rounded-full bg-white transition-transform ${useFreeImageGen ? 'translate-x-4' : 'translate-x-1'}`} />
-                </button>
-              </div>
+              <>
+                <div className="flex items-center justify-between mt-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+                  <span className={`text-[9px] font-black uppercase tracking-widest ${!useFreeImageGen ? 'text-purple-400' : 'text-zinc-600'}`}>PAID TIER</span>
+                  <button 
+                    onClick={() => {
+                      const newState = !useFreeImageGen;
+                      setUseFreeImageGen(newState);
+                      localStorage.setItem('sb_free_img', newState.toString());
+                    }}
+                    className={`relative inline-flex h-4 w-10 items-center rounded-full transition-colors ${useFreeImageGen ? 'bg-blue-500' : 'bg-purple-500'}`}
+                  >
+                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${useFreeImageGen ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                  <span className={`text-[9px] font-black uppercase tracking-widest ${useFreeImageGen ? 'text-blue-400' : 'text-zinc-600'}`}>FREE TIER</span>
+                </div>
+                <div className="text-[8px] text-zinc-500 font-mono mt-3 text-center uppercase tracking-widest">
+                  TXT: {globalTextModel}<br/>
+                  IMG: {useFreeImageGen ? 'pollinations.ai' : globalImageModel}
+                </div>
+              </>
             )}
           </div>
 
@@ -1620,7 +1642,7 @@ const App = () => {
                 </div>
               </div>
               
-              <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-zinc-800/50 mt-2">
+              <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-zinc-800/50 mt-2 scrollbar-hide">
                 <button onClick={() => setViewMode('scene')} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${viewMode === 'scene' ? 'bg-orange-500 text-white shadow-lg shadow-orange-900/20' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}>
                   <Settings2 size={14}/> CONFIG
                 </button>
@@ -2132,6 +2154,7 @@ const App = () => {
                       const previousHeading = previousShot?.sceneHeading || '';
                       const isNewScene = index === 0 || currentHeading !== previousHeading;
                       const isEditingThisHeading = bulkHeadingEdit.old === currentHeading;
+                      const colorTheme = SHOT_COLORS.find(c => c.name === shot.colorGroup) || SHOT_COLORS[0];
                       
                       return (
                       <React.Fragment key={shot.id}>
@@ -2157,12 +2180,25 @@ const App = () => {
                            </div>
                         )}
                         
-                        <div className={`group bg-zinc-900/40 border ${shot.fx ? 'border-orange-500/40' : 'border-zinc-800'} rounded-[2rem] md:rounded-[3rem] p-5 md:p-10 hover:bg-zinc-900/60 transition-all relative overflow-hidden mt-4`}>
+                        <div className={`group ${colorTheme.bg} border ${shot.fx ? 'border-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.15)]' : colorTheme.border} rounded-[2rem] md:rounded-[3rem] p-5 md:p-10 transition-all relative overflow-hidden mt-4`}>
                           
                           <div className="absolute top-0 right-0 p-4 md:p-6 text-6xl md:text-9xl text-zinc-800/20 font-black pointer-events-none select-none z-0">{index + 1}</div>
                           
-                          <button onClick={() => deleteShot(shot.id)} className="absolute top-4 right-4 md:top-6 md:right-6 p-2 text-zinc-600 hover:text-red-400 bg-zinc-950/80 rounded-full border border-zinc-800 hover:border-red-500/50 transition-all z-20 shadow-lg"><Trash2 size={16} /></button>
-                          
+                          {/* COLOR PICKER & DELETE */}
+                          <div className="absolute top-4 right-4 md:top-6 md:right-6 flex flex-col items-end gap-3 z-20">
+                             <button onClick={() => deleteShot(shot.id)} className="p-2 text-zinc-600 hover:text-red-400 bg-zinc-950/80 rounded-full border border-zinc-800 hover:border-red-500/50 transition-all shadow-lg"><Trash2 size={16} /></button>
+                             <div className="flex flex-col gap-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity bg-zinc-950/80 p-1.5 rounded-full border border-zinc-800">
+                               {SHOT_COLORS.map(c => (
+                                 <button 
+                                   key={c.name} 
+                                   onClick={() => updateShot(shot.id, 'colorGroup', c.name)} 
+                                   className={`w-3 h-3 rounded-full border border-zinc-700 hover:scale-125 transition-transform ${c.name !== 'none' ? c.bg.replace('/30', '') : 'bg-zinc-800'} ${shot.colorGroup === c.name ? 'ring-1 ring-white scale-125' : ''}`}
+                                   title={`Tag color: ${c.name}`}
+                                 />
+                               ))}
+                             </div>
+                          </div>
+
                           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 relative z-10 w-full mt-8 md:mt-0">
                             
                             <div className="lg:col-span-4 space-y-4 w-full">
@@ -2191,8 +2227,8 @@ const App = () => {
                                         <ImageIcon className="text-zinc-800 mx-auto" size={32} />
                                         <label className="text-[10px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 hover:border-orange-500/50 hover:bg-orange-500/10 px-4 py-2 rounded-full flex items-center gap-2 cursor-pointer transition-all">
                                           <Upload size={10} /> UPLOAD
+                                          <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(shot.id, e)} />
                                         </label>
-                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(shot.id, e)} />
                                         {aiEnabled && (
                                           <div className="flex gap-2">
                                             <button onClick={() => setVisiblePromptId(shot.id)} className="text-[9px] font-black text-zinc-600 hover:text-purple-400 flex items-center gap-1 transition-colors uppercase tracking-widest bg-zinc-900 px-3 py-1.5 rounded border border-zinc-800"><FileText size={10} /> PROMPT</button>
@@ -2239,13 +2275,13 @@ const App = () => {
                               <div className="space-y-6">
                                 <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-4">
                                   <div className="flex-1 space-y-3 w-full">
-                                    <input value={shot.subject || ''} onChange={(e) => updateShot(shot.id, 'subject', e.target.value)} placeholder="Subject..." className="w-full bg-transparent text-xl md:text-2xl font-black border-b border-zinc-800 focus:border-orange-500 p-1 focus:outline-none" />
+                                    <input value={shot.subject || ''} onChange={(e) => updateShot(shot.id, 'subject', e.target.value)} placeholder="Subject..." className="w-full bg-transparent text-xl md:text-2xl font-black border-b border-zinc-500 focus:border-orange-500 p-1 focus:outline-none" />
                                     {availableCharacters.length > 0 && (
                                       <div className="flex flex-wrap gap-2 pt-1">
-                                        <span className="text-[9px] font-black text-zinc-600 uppercase flex items-center h-6 mr-1 shrink-0">In Shot:</span>
+                                        <span className="text-[9px] font-black text-zinc-500 uppercase flex items-center h-6 mr-1 shrink-0">In Shot:</span>
                                         {availableCharacters.map(char => {
                                           const isActive = (shot.shotCharacters || []).includes(char);
-                                          return (<button key={char} onClick={() => toggleShotCharacter(shot.id, char)} className={`px-3 py-1.5 md:py-1 rounded-full text-[10px] font-bold border transition-all whitespace-nowrap ${isActive ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}>{char}</button>);
+                                          return (<button key={char} onClick={() => toggleShotCharacter(shot.id, char)} className={`px-3 py-1.5 md:py-1 rounded-full text-[10px] font-bold border transition-all whitespace-nowrap ${isActive ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-zinc-800/50 text-zinc-500 border-zinc-700/50'}`}>{char}</button>);
                                         })}
                                       </div>
                                     )}
@@ -2253,7 +2289,7 @@ const App = () => {
                                 </div>
                                 
                                 <div className="space-y-2 w-full">
-                                  <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
+                                  <div className="flex items-center gap-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">
                                     <div className="flex items-center gap-1">
                                       <button onClick={() => handleVoiceInput(shot.action, (val) => updateShot(shot.id, 'action', val), `action-${shot.id}`)} className={`p-1 rounded transition-colors ${activeMicId === `action-${shot.id}` ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={10}/></button>
                                       {history[`shot-${shot.id}-action`] !== undefined && (
@@ -2265,12 +2301,12 @@ const App = () => {
                                     </div>
                                     Action / Blocking
                                   </div>
-                                  <textarea value={shot.action || ''} onChange={(e) => updateShot(shot.id, 'action', e.target.value)} className="w-full bg-zinc-950/50 rounded-[1.5rem] p-4 text-xs text-zinc-300 min-h-[80px] md:min-h-[60px] focus:outline-none border border-zinc-800/50 focus:border-orange-500/50 resize-y" />
+                                  <textarea value={shot.action || ''} onChange={(e) => updateShot(shot.id, 'action', e.target.value)} className="w-full bg-zinc-950/30 rounded-[1.5rem] p-4 text-xs text-zinc-200 min-h-[80px] md:min-h-[60px] focus:outline-none border border-zinc-800/30 focus:border-orange-500/50 resize-y" />
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 w-full">
                                   <div className="space-y-2 w-full">
-                                    <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
+                                    <div className="flex items-center gap-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">
                                       <div className="flex items-center gap-1">
                                         <button onClick={() => handleVoiceInput(shot.dialogue, (val) => updateShot(shot.id, 'dialogue', val), `dialogue-${shot.id}`)} className={`p-1 rounded transition-colors ${activeMicId === `dialogue-${shot.id}` ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={10}/></button>
                                         {history[`shot-${shot.id}-dialogue`] !== undefined && (
@@ -2282,10 +2318,10 @@ const App = () => {
                                       </div>
                                       Dialogue / Improv
                                     </div>
-                                    <textarea value={shot.dialogue || ''} onChange={(e) => updateShot(shot.id, 'dialogue', e.target.value)} className="w-full bg-zinc-950/50 rounded-[1.5rem] p-4 text-xs text-zinc-200 min-h-[100px] focus:outline-none border border-zinc-800/50 focus:border-purple-500/50 resize-y" />
+                                    <textarea value={shot.dialogue || ''} onChange={(e) => updateShot(shot.id, 'dialogue', e.target.value)} className="w-full bg-zinc-950/30 rounded-[1.5rem] p-4 text-xs text-zinc-200 min-h-[100px] focus:outline-none border border-zinc-800/30 focus:border-purple-500/50 resize-y" />
                                   </div>
                                   <div className="space-y-2 w-full">
-                                    <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
+                                    <div className="flex items-center gap-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">
                                       <div className="flex items-center gap-1">
                                         <button onClick={() => handleVoiceInput(shot.notes, (val) => updateShot(shot.id, 'notes', val), `notes-${shot.id}`)} className={`p-1 rounded transition-colors ${activeMicId === `notes-${shot.id}` ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={10}/></button>
                                         {history[`shot-${shot.id}-notes`] !== undefined && (
@@ -2297,12 +2333,12 @@ const App = () => {
                                       </div>
                                       Director Notes
                                     </div>
-                                    <textarea value={shot.notes || ''} onChange={(e) => updateShot(shot.id, 'notes', e.target.value)} className="w-full bg-zinc-950/50 rounded-[1.5rem] p-4 text-xs text-zinc-400 min-h-[100px] focus:outline-none border border-zinc-800/50 focus:border-blue-500/50 resize-y italic" />
+                                    <textarea value={shot.notes || ''} onChange={(e) => updateShot(shot.id, 'notes', e.target.value)} className="w-full bg-zinc-950/30 rounded-[1.5rem] p-4 text-xs text-zinc-400 min-h-[100px] focus:outline-none border border-zinc-800/30 focus:border-blue-500/50 resize-y italic" />
                                   </div>
                                 </div>
                               </div>
                               
-                              <div className="flex justify-end items-end mt-6 pt-4 border-t border-zinc-800/50">
+                              <div className="flex justify-end items-end mt-6 pt-4 border-t border-zinc-800/30">
                                 <div className="flex items-center gap-1 bg-zinc-950/50 rounded-xl p-1 border border-zinc-800/50">
                                   <button onClick={() => moveShot(index, -1)} disabled={index === 0} className="p-2 md:p-1.5 text-zinc-600 hover:text-white disabled:opacity-20 transition-colors" title="Move Up"><ArrowUp size={16} /></button>
                                   <div className="flex items-center px-1">
@@ -2349,16 +2385,18 @@ const App = () => {
                 
                 {boardSubTab === 'shoot-plan' && (
                   <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
-                     {shootPlan.length > 0 ? (
-                      shootPlan.map((shot, index) => {
-                        const isNewScene = index === 0 || shot.sceneHeading !== shootPlan[index - 1].sceneHeading;
+                     {currentDisplayList.length > 0 ? (
+                      currentDisplayList.map((shot, index) => {
+                        const isNewScene = index === 0 || shot.sceneHeading !== currentDisplayList[index - 1].sceneHeading;
                         const isSameSetup = !isNewScene && index > 0 && 
-                            shot.type === shootPlan[index - 1].type && 
-                            (shot.locationCaveat || '') === (shootPlan[index - 1].locationCaveat || '');
-                        const isSameSetupAsNext = index < shootPlan.length - 1 && 
-                            shot.sceneHeading === shootPlan[index + 1].sceneHeading && 
-                            shot.type === shootPlan[index + 1].type && 
-                            (shot.locationCaveat || '') === (shootPlan[index + 1].locationCaveat || '');
+                            shot.type === currentDisplayList[index - 1].type && 
+                            (shot.locationCaveat || '') === (currentDisplayList[index - 1].locationCaveat || '');
+                        const isSameSetupAsNext = index < currentDisplayList.length - 1 && 
+                            shot.sceneHeading === currentDisplayList[index + 1].sceneHeading && 
+                            shot.type === currentDisplayList[index + 1].type && 
+                            (shot.locationCaveat || '') === (currentDisplayList[index + 1].locationCaveat || '');
+                        
+                        const rowColorTheme = SHOT_COLORS.find(c => c.name === shot.colorGroup) || SHOT_COLORS[0];
 
                         return (
                           <React.Fragment key={shot.id}>
@@ -2370,11 +2408,11 @@ const App = () => {
                                 <div className="h-px bg-zinc-800 flex-1"></div>
                               </div>
                             )}
-                            <div className={`group bg-zinc-900/40 border-x border-zinc-800 ${shot.fx ? 'border-orange-500/40' : ''} ${isSameSetupAsNext ? 'border-b-0 rounded-t-[2rem] rounded-b-none mb-0 pb-6' : 'border-b border-zinc-800 rounded-b-[2rem] mb-4'} ${isSameSetup ? 'border-t-0 rounded-t-none mt-0 pt-6' : 'border-t border-zinc-800 rounded-t-[2rem] mt-4'} hover:bg-zinc-900/60 transition-all relative overflow-hidden shadow-md`}>
+                            <div className={`group bg-zinc-900/40 border-x border-zinc-800 ${shot.fx ? 'border-orange-500/40 shadow-[0_0_15px_rgba(249,115,22,0.1)]' : ''} ${isSameSetupAsNext ? 'border-b-0 rounded-t-[2rem] rounded-b-none mb-0 pb-6' : 'border-b border-zinc-800 rounded-b-[2rem] mb-4'} ${isSameSetup ? 'border-t-0 rounded-t-none mt-0 pt-6' : 'border-t border-zinc-800 rounded-t-[2rem] mt-4'} ${rowColorTheme.name !== 'none' ? rowColorTheme.bg : ''} hover:bg-zinc-900/60 transition-all relative overflow-hidden shadow-md`}>
                                
                                {isSameSetup && <div className="absolute top-0 left-6 right-6 h-px border-t border-dashed border-zinc-700"></div>}
 
-                               <div className="absolute top-0 right-0 p-4 text-4xl text-zinc-800/30 font-black pointer-events-none select-none z-0">{shot.shootOrderNumber}</div>
+                               <div className="absolute top-0 right-0 p-4 text-4xl text-zinc-800/30 font-black pointer-events-none select-none z-0">{shot.shootOrderNumber || index + 1}</div>
                                <div className="relative z-10 flex flex-col md:flex-row gap-6">
                                  {shot.image ? (
                                    <img src={shot.image} className="w-full md:w-48 aspect-video object-cover rounded-xl border border-zinc-800 shrink-0"/>
@@ -2394,11 +2432,36 @@ const App = () => {
                                      {!isSameSetup && shot.locationCaveat && <span className="text-[10px] font-black text-yellow-500 bg-yellow-500/10 border border-yellow-500/20 uppercase tracking-widest px-2 py-1 rounded">LOC: {shot.locationCaveat}</span>}
                                      
                                      {shot.duration && <span className="text-[10px] font-black text-green-500 bg-green-500/10 border border-green-500/20 uppercase tracking-widest px-2 py-1 rounded flex items-center gap-1"><Clock size={10} className="inline -mt-0.5"/> {shot.duration}<span className="opacity-50 lowercase ml-[1px]">s</span></span>}
-                                     <span className="text-lg font-black uppercase">{shot.subject}</span>
+                                     
+                                     <input 
+                                        value={shot.subject || ''} 
+                                        onChange={e => updateShot(shot.id, 'subject', e.target.value)} 
+                                        className="text-lg font-black uppercase bg-transparent hover:bg-zinc-800 focus:bg-zinc-100 focus:text-zinc-950 rounded px-1 -mx-1 outline-none transition-colors w-full md:w-auto"
+                                     />
                                    </div>
                                    {shot.optimizationReason && <div className="text-xs italic text-yellow-500/70 border-l-2 border-yellow-500/50 pl-3 py-1 my-2">{shot.optimizationReason}</div>}
-                                   <p className="text-sm text-zinc-400"><span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 block mb-1">Action</span>{shot.action}</p>
-                                   <p className="text-xs text-zinc-500"><span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 block mb-1 mt-2">Notes</span>{shot.notes}</p>
+                                   
+                                   <div className="flex flex-col">
+                                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 block mb-1">Action</span>
+                                     <textarea 
+                                        value={shot.action || ''} 
+                                        onChange={e => updateShot(shot.id, 'action', e.target.value)} 
+                                        onInput={handleAutoResize}
+                                        className="text-sm text-zinc-300 bg-transparent hover:bg-zinc-800 focus:bg-zinc-100 focus:text-zinc-950 rounded px-2 py-1 -mx-2 outline-none transition-colors resize-none overflow-hidden"
+                                        rows={1}
+                                     />
+                                   </div>
+
+                                   <div className="flex flex-col mt-2">
+                                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 block mb-1">Notes</span>
+                                     <textarea 
+                                        value={shot.notes || ''} 
+                                        onChange={e => updateShot(shot.id, 'notes', e.target.value)} 
+                                        onInput={handleAutoResize}
+                                        className="text-xs text-zinc-500 bg-transparent hover:bg-zinc-800 focus:bg-zinc-100 focus:text-zinc-950 rounded px-2 py-1 -mx-2 outline-none transition-colors resize-none overflow-hidden"
+                                        rows={1}
+                                     />
+                                   </div>
                                  </div>
                                </div>
                             </div>
@@ -2433,7 +2496,7 @@ const App = () => {
                           <div className="flex bg-zinc-200 rounded-full p-1 shadow-inner items-center">
                             <span className="text-[10px] font-black uppercase text-zinc-500 px-3 select-none">Sort:</span>
                             <button onClick={() => setPrintListMode('sequence')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${printListMode === 'sequence' ? 'bg-black text-white shadow' : 'text-zinc-600 hover:text-black'}`}>IN SEQUENCE</button>
-                            <button onClick={() => { if(shootPlan.length > 0) setPrintListMode('shoot-plan'); else optimizeShootOrder(true); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${printListMode === 'shoot-plan' ? 'bg-black text-white shadow' : 'text-zinc-600 hover:text-black'}`}>
+                            <button onClick={() => { if(shootPlanMeta.length > 0) setPrintListMode('shoot-plan'); else optimizeShootOrder(true); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${printListMode === 'shoot-plan' ? 'bg-black text-white shadow' : 'text-zinc-600 hover:text-black'}`}>
                                {loadingStates.optimizing ? <Loader2 size={12} className="animate-spin inline" /> : '1ST AD PLAN'}
                             </button>
                           </div>
@@ -2467,16 +2530,24 @@ const App = () => {
                                   shot.type === currentDisplayList[idx - 1].type && 
                                   (shot.locationCaveat || '') === (currentDisplayList[idx - 1].locationCaveat || '');
                                 
+                                const rowColorTheme = SHOT_COLORS.find(c => c.name === shot.colorGroup) || SHOT_COLORS[0];
+                                
                                 return (
                                   <React.Fragment key={shot.id}>
                                     {isNewScene && (
                                       <tr>
-                                        <td colSpan="4" className="py-4 font-black uppercase border-b border-black text-xs bg-zinc-100 px-2">{shot.sceneHeading}</td>
+                                        <td colSpan="4" className="py-4 font-black uppercase border-b border-black text-xs bg-zinc-100 px-2 print:bg-transparent">
+                                          <input 
+                                             value={shot.sceneHeading || ''} 
+                                             onChange={e => updateShot(shot.id, 'sceneHeading', e.target.value)} 
+                                             className="bg-transparent w-full outline-none hover:bg-black/5 focus:bg-white focus:ring-2 focus:ring-blue-500 rounded px-1 transition-all" 
+                                          />
+                                        </td>
                                       </tr>
                                     )}
-                                    <tr className="border-b border-zinc-200 align-top break-inside-avoid">
-                                      <td className="py-4 font-bold">{printListMode === 'shoot-plan' ? shot.shootOrderNumber : idx + 1}</td>
-                                      <td className="py-4 font-bold text-[10px] uppercase">
+                                    <tr className={`border-b border-zinc-200 align-top break-inside-avoid ${rowColorTheme.listRow}`}>
+                                      <td className="py-4 font-bold px-2">{printListMode === 'shoot-plan' ? shot.shootOrderNumber || idx + 1 : idx + 1}</td>
+                                      <td className="py-4 font-bold text-[10px] uppercase px-2">
                                         {isSameSetup ? (
                                           <span className="text-yellow-600">↳ SAME SETUP</span>
                                         ) : (
@@ -2488,17 +2559,45 @@ const App = () => {
                                         )}
                                         {shot.shotCharacters?.length > 0 && (
                                           <div className="mt-2 space-y-1">
-                                            {shot.shotCharacters.map(c => <span key={c} className="block text-[8px] bg-zinc-100 px-1 py-0.5 rounded border border-zinc-300 w-fit">{c}</span>)}
+                                            {shot.shotCharacters.map(c => <span key={c} className="block text-[8px] bg-white px-1 py-0.5 rounded border border-zinc-300 w-fit">{c}</span>)}
                                           </div>
                                         )}
                                       </td>
                                       <td className="py-4 space-y-1 pr-4">
-                                        <p className="font-bold">{shot.subject}</p>
-                                        {shot.action && <p className="text-sm">{shot.action}</p>}
-                                        {shot.dialogue && <p className="text-xs italic">"{shot.dialogue}"</p>}
-                                        {shot.notes && <p className="text-[10px] text-zinc-500">Note: {shot.notes}</p>}
+                                        <input 
+                                           value={shot.subject || ''} 
+                                           onChange={e => updateShot(shot.id, 'subject', e.target.value)} 
+                                           className="font-bold text-sm w-full bg-transparent hover:bg-black/5 focus:bg-white focus:ring-2 focus:ring-blue-500 rounded px-1 -mx-1 outline-none transition-all" 
+                                        />
+                                        <textarea 
+                                           value={shot.action || ''} 
+                                           onChange={e => updateShot(shot.id, 'action', e.target.value)} 
+                                           onInput={handleAutoResize}
+                                           className="text-sm w-full bg-transparent hover:bg-black/5 focus:bg-white focus:ring-2 focus:ring-blue-500 rounded px-1 -mx-1 outline-none transition-all resize-none overflow-hidden" 
+                                           rows={1}
+                                        />
+                                        <textarea 
+                                           value={shot.dialogue || ''} 
+                                           onChange={e => updateShot(shot.id, 'dialogue', e.target.value)} 
+                                           onInput={handleAutoResize}
+                                           className="text-xs italic w-full bg-transparent hover:bg-black/5 focus:bg-white focus:ring-2 focus:ring-blue-500 rounded px-1 -mx-1 outline-none transition-all resize-none overflow-hidden mt-1" 
+                                           rows={1}
+                                           placeholder="Dialogue..."
+                                        />
+                                        <textarea 
+                                           value={shot.notes || ''} 
+                                           onChange={e => updateShot(shot.id, 'notes', e.target.value)} 
+                                           onInput={handleAutoResize}
+                                           className="text-[10px] text-zinc-500 w-full bg-transparent hover:bg-black/5 focus:bg-white focus:ring-2 focus:ring-blue-500 rounded px-1 -mx-1 outline-none transition-all resize-none overflow-hidden mt-1" 
+                                           rows={1}
+                                           placeholder="Notes..."
+                                        />
                                       </td>
-                                      <td className="py-4 font-black text-xs">{shot.fx ? 'YES' : '—'}</td>
+                                      <td className="py-4 font-black text-xs px-2">
+                                        <button onClick={() => updateShot(shot.id, 'fx', !shot.fx)} className={`px-2 py-1 rounded text-[8px] print:border-none ${shot.fx ? 'bg-orange-500 text-white' : 'text-zinc-300 hover:bg-zinc-200'}`}>
+                                          {shot.fx ? 'YES' : '—'}
+                                        </button>
+                                      </td>
                                     </tr>
                                   </React.Fragment>
                                 )
