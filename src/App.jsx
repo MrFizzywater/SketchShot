@@ -60,13 +60,13 @@ const TONES = ['Absurdist', 'Disruptive / Cringe', 'Deadpan', 'Slapstick', 'Sati
 const COMEDY_ARCHETYPES = ['The Protagonist', 'The Antagonist', 'The Mentor', 'The Sidekick', 'The Innocent', 'The Everyman', 'The Weirdo', 'The Bureaucrat', 'The Straight Man', 'The Wildcard', 'The Neurotic', 'The Himbo / Bimbo', 'The Agent of Chaos', 'The Deadpan', 'The Instigator', 'The Oblivious One', 'The Cynic', 'The Over-Enthusiast', 'The Voice of Reason', 'The Fall Guy', 'None', 'Other'];
 
 const SHOT_COLORS = [
-  { name: 'none', bg: 'bg-zinc-900/40', border: 'border-zinc-800', listRow: '' },
-  { name: 'red', bg: 'bg-red-950/30', border: 'border-red-500/30', listRow: 'border-l-[6px] border-l-red-500 bg-red-50/50 print:bg-red-50' },
-  { name: 'orange', bg: 'bg-orange-950/30', border: 'border-orange-500/30', listRow: 'border-l-[6px] border-l-orange-500 bg-orange-50/50 print:bg-orange-50' },
-  { name: 'yellow', bg: 'bg-yellow-950/30', border: 'border-yellow-500/30', listRow: 'border-l-[6px] border-l-yellow-500 bg-yellow-50/50 print:bg-yellow-50' },
-  { name: 'green', bg: 'bg-green-950/30', border: 'border-green-500/30', listRow: 'border-l-[6px] border-l-green-500 bg-green-50/50 print:bg-green-50' },
-  { name: 'blue', bg: 'bg-blue-950/30', border: 'border-blue-500/30', listRow: 'border-l-[6px] border-l-blue-500 bg-blue-50/50 print:bg-blue-50' },
-  { name: 'purple', bg: 'bg-purple-950/30', border: 'border-purple-500/30', listRow: 'border-l-[6px] border-l-purple-500 bg-purple-50/50 print:bg-purple-50' },
+  { name: 'none', bg: 'bg-zinc-900/40', border: 'border-zinc-800', listRow: '', dotBg: 'bg-zinc-800' },
+  { name: 'red', bg: 'bg-red-950/30', border: 'border-red-500/30', listRow: 'border-l-[6px] border-l-red-500 bg-red-50/50 print:bg-red-50', dotBg: 'bg-red-500' },
+  { name: 'orange', bg: 'bg-orange-950/30', border: 'border-orange-500/30', listRow: 'border-l-[6px] border-l-orange-500 bg-orange-50/50 print:bg-orange-50', dotBg: 'bg-orange-500' },
+  { name: 'yellow', bg: 'bg-yellow-950/30', border: 'border-yellow-500/30', listRow: 'border-l-[6px] border-l-yellow-500 bg-yellow-50/50 print:bg-yellow-50', dotBg: 'bg-yellow-500' },
+  { name: 'green', bg: 'bg-green-950/30', border: 'border-green-500/30', listRow: 'border-l-[6px] border-l-green-500 bg-green-50/50 print:bg-green-50', dotBg: 'bg-green-500' },
+  { name: 'blue', bg: 'bg-blue-950/30', border: 'border-blue-500/30', listRow: 'border-l-[6px] border-l-blue-500 bg-blue-50/50 print:bg-blue-50', dotBg: 'bg-blue-500' },
+  { name: 'purple', bg: 'bg-purple-950/30', border: 'border-purple-500/30', listRow: 'border-l-[6px] border-l-purple-500 bg-purple-50/50 print:bg-purple-50', dotBg: 'bg-purple-500' },
 ];
 
 const getGenderText = (val) => {
@@ -132,56 +132,69 @@ const mergeCharacters = (existingProfiles, newAICharacters) => {
   return updatedProfiles;
 };
 
-// HELPER: Robust free image generator using direct Blob fetching with Exponential Backoff
-const fetchFreeImage = async (promptText, width, height) => {
-  const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim() + " cinematic, highly detailed");
-  const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
-  
-  let response;
-  for (let i = 0; i < 3; i++) {
-    response = await fetch(url);
-    if (response.ok) break;
-    if (response.status === 429 && i < 2) {
-      await new Promise(r => setTimeout(r, 2500 * (i + 1))); // Quietly wait 2.5s, then 5s before retrying
-      continue;
-    }
-    if (response.status === 429) throw new Error("The Free Image server is overwhelmed right now (429). Give it a minute to cool down!");
-    throw new Error("Free image generator failed.");
-  }
-
-  const blob = await response.blob();
-  
+// HELPER: Upgraded Free Image Generator (CORS/Timeout proof)
+const fetchFreeImage = (promptText, width, height) => {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("Failed to read image blob."));
-    reader.readAsDataURL(blob);
+    const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim() + " cinematic, highly detailed");
+    const url = `https://pollinations.ai/p/${safePrompt}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
+
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    
+    const timeoutId = setTimeout(() => {
+      img.src = '';
+      reject(new Error("Free Image Generator timed out. The indie server might be busy."));
+    }, 15000);
+
+    img.onload = () => {
+      clearTimeout(timeoutId);
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+
+    img.onerror = () => {
+      clearTimeout(timeoutId);
+      reject(new Error("Free Image Generator failed to load."));
+    };
+
+    img.src = url;
   });
 };
 
-const fetchFreeAvatar = async (promptText) => {
-  const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim());
-  const url = `https://image.pollinations.ai/prompt/${safePrompt}?width=256&height=256&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
-  
-  let response;
-  for (let i = 0; i < 3; i++) {
-    response = await fetch(url);
-    if (response.ok) break;
-    if (response.status === 429 && i < 2) {
-      await new Promise(r => setTimeout(r, 2500 * (i + 1))); 
-      continue;
-    }
-    if (response.status === 429) throw new Error("The Free Image server is overwhelmed right now (429). Give it a minute to cool down!");
-    throw new Error("Free avatar generator failed.");
-  }
-
-  const blob = await response.blob();
-  
+const fetchFreeAvatar = (promptText) => {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("Failed to read image blob."));
-    reader.readAsDataURL(blob);
+    const safePrompt = encodeURIComponent((promptText.substring(0, 900)).trim());
+    const url = `https://pollinations.ai/p/${safePrompt}?width=512&height=512&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
+
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    
+    const timeoutId = setTimeout(() => {
+      img.src = '';
+      reject(new Error("Free Avatar Generator timed out. The indie server might be busy."));
+    }, 15000);
+
+    img.onload = () => {
+      clearTimeout(timeoutId);
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      const size = Math.min(img.width, img.height);
+      const x = (img.width - size) / 2;
+      const y = (img.height - size) / 2;
+      ctx.drawImage(img, x, y, size, size, 0, 0, 256, 256);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+
+    img.onerror = () => {
+      clearTimeout(timeoutId);
+      reject(new Error("Free Avatar Generator failed to load."));
+    };
+
+    img.src = url;
   });
 };
 
@@ -672,7 +685,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "8.6", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "8.7", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -683,7 +696,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "8.6", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "8.7", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -959,7 +972,7 @@ const App = () => {
     const char = activeProfiles.find(c => c.id === charId);
     
     // HEAVILY WEIGHTED VISUAL STYLE PROMPT
-    const promptText = `A close-up cinematic headshot photograph of a ${char.age} year old ${char.sex || 'person'} with ${getSkinText(char.melanin)} who is ${getGenderText(char.gender)}. They are dressed and styled specifically as: "${char.visualStyle}". Their overall vibe/personality is: "${char.personality}" (${char.archetype} archetype). Plain neutral background. Highly detailed, photorealistic.`;
+    const promptText = `A cinematic headshot of a person wearing ${char.visualStyle || 'everyday clothes'}. They are a ${char.age} year old ${char.sex || 'person'}, ${getSkinText(char.melanin)}, ${getGenderText(char.gender)}. Their facial expression shows their personality: ${char.personality || char.archetype}. Plain neutral background. Photorealistic, highly detailed.`;
 
     if (useFreeImageGen) {
       try {
@@ -1259,7 +1272,8 @@ const App = () => {
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, singleAIShot: false })); }
   };
 
-  const optimizeShootOrder = async () => {
+  const optimizeShootOrder = async (isPrintList = false) => {
+    const printTrigger = typeof isPrintList === 'boolean' ? isPrintList : false;
     setLoadingStates(prev => ({ ...prev, optimizing: true }));
     try {
       const systemPrompt = `Expert 1st AD. Reorder shots into the most efficient SHOOT ORDER. 
@@ -1270,8 +1284,57 @@ const App = () => {
       const optimizedIds = await callGemini(prompt, systemPrompt, true);
       
       if (optimizedIds && Array.isArray(optimizedIds)) {
-        setShootPlanMeta(optimizedIds);
-        setBoardSubTab('shoot-plan');
+        // Auto Color Code the new setup blocks
+        const colors = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+        let colorIndex = -1;
+        let currentScene = '';
+        let currentType = '';
+        let currentLoc = '';
+
+        const colorMappedIds = optimizedIds.map((item, idx) => {
+          const foundShot = activeShots.find(s => s.id === item.id);
+          if (!foundShot) return null;
+
+          const isSameSetup = idx > 0 &&
+            foundShot.sceneHeading === currentScene &&
+            foundShot.type === currentType &&
+            (foundShot.locationCaveat || '') === currentLoc;
+
+          if (!isSameSetup) {
+             colorIndex = (colorIndex + 1) % colors.length;
+          }
+
+          currentScene = foundShot.sceneHeading;
+          currentType = foundShot.type;
+          currentLoc = foundShot.locationCaveat || '';
+
+          return {
+             ...foundShot,
+             shootOrderNumber: idx + 1,
+             optimizationReason: item.reason,
+             colorGroup: colors[colorIndex]
+          };
+        }).filter(s => s !== null);
+
+        // Batch update all shots so colors persist on the visual grid
+        updateContextState(prev => {
+          return prev.map(s => {
+            if (s.sketchId !== activeSketchId) return s;
+            const updated = colorMappedIds.find(mapped => mapped.id === s.id);
+            if (updated) {
+              return { ...s, colorGroup: updated.colorGroup };
+            }
+            return s;
+          });
+        }, false);
+
+        setShootPlanMeta(colorMappedIds);
+        
+        if (printTrigger) {
+          setPrintListMode('shoot-plan');
+        } else {
+          setBoardSubTab('shoot-plan');
+        }
       }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, optimizing: false })); }
   };
@@ -1421,7 +1484,6 @@ const App = () => {
     }
   };
 
-  // Helper for auto-resizing textareas in the List Views
   const handleAutoResize = (e) => {
     e.target.style.height = 'auto';
     e.target.style.height = e.target.scrollHeight + 'px';
@@ -1438,7 +1500,6 @@ const App = () => {
   return (
     <div className="flex h-screen w-full bg-zinc-950 text-zinc-100 font-sans selection:bg-orange-500/30 overflow-hidden relative print:block print:h-auto print:overflow-visible print:bg-white">
       
-      {/* Hide scrollbars class injection */}
       <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
 
       {!isRealUser && !isGuest && (
@@ -2192,7 +2253,7 @@ const App = () => {
                                  <button 
                                    key={c.name} 
                                    onClick={() => updateShot(shot.id, 'colorGroup', c.name)} 
-                                   className={`w-3 h-3 rounded-full border border-zinc-700 hover:scale-125 transition-transform ${c.name !== 'none' ? c.bg.replace('/30', '') : 'bg-zinc-800'} ${shot.colorGroup === c.name ? 'ring-1 ring-white scale-125' : ''}`}
+                                   className={`w-3 h-3 rounded-full border border-zinc-700 hover:scale-125 transition-transform ${c.dotBg} ${shot.colorGroup === c.name ? 'ring-1 ring-white scale-125' : ''}`}
                                    title={`Tag color: ${c.name}`}
                                  />
                                ))}
@@ -2289,7 +2350,7 @@ const App = () => {
                                 </div>
                                 
                                 <div className="space-y-2 w-full">
-                                  <div className="flex items-center gap-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">
+                                  <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
                                     <div className="flex items-center gap-1">
                                       <button onClick={() => handleVoiceInput(shot.action, (val) => updateShot(shot.id, 'action', val), `action-${shot.id}`)} className={`p-1 rounded transition-colors ${activeMicId === `action-${shot.id}` ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={10}/></button>
                                       {history[`shot-${shot.id}-action`] !== undefined && (
@@ -2306,7 +2367,7 @@ const App = () => {
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 w-full">
                                   <div className="space-y-2 w-full">
-                                    <div className="flex items-center gap-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">
+                                    <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
                                       <div className="flex items-center gap-1">
                                         <button onClick={() => handleVoiceInput(shot.dialogue, (val) => updateShot(shot.id, 'dialogue', val), `dialogue-${shot.id}`)} className={`p-1 rounded transition-colors ${activeMicId === `dialogue-${shot.id}` ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={10}/></button>
                                         {history[`shot-${shot.id}-dialogue`] !== undefined && (
@@ -2321,7 +2382,7 @@ const App = () => {
                                     <textarea value={shot.dialogue || ''} onChange={(e) => updateShot(shot.id, 'dialogue', e.target.value)} className="w-full bg-zinc-950/30 rounded-[1.5rem] p-4 text-xs text-zinc-200 min-h-[100px] focus:outline-none border border-zinc-800/30 focus:border-purple-500/50 resize-y" />
                                   </div>
                                   <div className="space-y-2 w-full">
-                                    <div className="flex items-center gap-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">
+                                    <div className="flex items-center gap-2 text-[9px] font-black text-zinc-600 uppercase tracking-widest">
                                       <div className="flex items-center gap-1">
                                         <button onClick={() => handleVoiceInput(shot.notes, (val) => updateShot(shot.id, 'notes', val), `notes-${shot.id}`)} className={`p-1 rounded transition-colors ${activeMicId === `notes-${shot.id}` ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={10}/></button>
                                         {history[`shot-${shot.id}-notes`] !== undefined && (
