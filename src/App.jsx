@@ -22,8 +22,8 @@ import {
 // --- ENVIRONMENT INITIALIZATION ---
 let firebaseConfig = {};
 let globalTextModel = "gemini-flash-latest"; 
-let globalImageModel = "imagen-4.0-generate-001"; // Updated to match 4.0 default
-let globalFreeImageUrl = "https://image.pollinations.ai/prompt/"; // New: Default free endpoint
+let globalImageModel = "imagen-3.0-generate-001"; // Defaulted to 3.0 to prevent 404 preview blocks
+let globalFreeImageUrl = "https://image.pollinations.ai/prompt/"; // Default free endpoint
 
 try {
   if (typeof import.meta !== 'undefined' && import.meta.env) {
@@ -136,11 +136,8 @@ const mergeCharacters = (existingProfiles, newAICharacters) => {
 
 // HELPER: Robust free image generator using direct Blob fetching with Exponential Backoff
 const fetchFreeImage = async (promptText, width, height) => {
-  // Strip line breaks and limit length so we don't crash the Pollinations URL parser with a 500 error
   const cleanPrompt = promptText.replace(/[\n\r]/g, ' ').substring(0, 500).trim();
   const safePrompt = encodeURIComponent(cleanPrompt + ", cinematic, highly detailed");
-  
-  // Guarantee trailing slash for the base URL to prevent broken links
   const baseUrl = globalFreeImageUrl.endsWith('/') ? globalFreeImageUrl : `${globalFreeImageUrl}/`;
   const url = `${baseUrl}${safePrompt}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
   
@@ -149,21 +146,19 @@ const fetchFreeImage = async (promptText, width, height) => {
     try {
       response = await fetch(url);
       if (response.ok) break;
-      // Catch both Rate Limits (429) and Server Overloads (500+)
       if ((response.status === 429 || response.status >= 500) && i < 2) {
-        await new Promise(r => setTimeout(r, 2500 * (i + 1))); // Quietly wait before retrying
+        await new Promise(r => setTimeout(r, 2500 * (i + 1))); 
         continue;
       }
       if (response.status === 429) throw new Error("The Free Image server is overwhelmed right now (429). Give it a minute to cool down!");
       throw new Error(`Server returned ${response.status}`);
     } catch (e) {
       if (i === 2) throw new Error(`Free image generator failed to connect to ${baseUrl}. Check your Coolify variables.`);
-      await new Promise(r => setTimeout(r, 1500)); // Network delay backoff
+      await new Promise(r => setTimeout(r, 1500)); 
     }
   }
 
   const blob = await response.blob();
-  
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result);
@@ -175,8 +170,6 @@ const fetchFreeImage = async (promptText, width, height) => {
 const fetchFreeAvatar = async (promptText) => {
   const cleanPrompt = promptText.replace(/[\n\r]/g, ' ').substring(0, 500).trim();
   const safePrompt = encodeURIComponent(cleanPrompt);
-  
-  // Guarantee trailing slash
   const baseUrl = globalFreeImageUrl.endsWith('/') ? globalFreeImageUrl : `${globalFreeImageUrl}/`;
   const url = `${baseUrl}${safePrompt}?width=256&height=256&nologo=true&seed=${Math.floor(Math.random()*100000)}`;
   
@@ -198,7 +191,6 @@ const fetchFreeAvatar = async (promptText) => {
   }
 
   const blob = await response.blob();
-  
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result);
@@ -249,7 +241,9 @@ const App = () => {
   
   const [fullResImages, setFullResImages] = useState({});
   const [userApiKey, setUserApiKey] = useState(localStorage.getItem('sketchbeans_gemini_key') || '');
-  const [aiEnabled, setAiEnabled] = useState(localStorage.getItem('sketchbeans_ai_enabled') === 'true');
+  
+  // THREE-WAY AI TOGGLE STATE
+  const [aiMode, setAiMode] = useState(localStorage.getItem('sketchbeans_ai_mode') || 'manual');
   const [useFreeImageGen, setUseFreeImageGen] = useState(localStorage.getItem('sb_free_img') === 'true');
   const [history, setHistory] = useState({});
 
@@ -264,7 +258,6 @@ const App = () => {
   const [bulkCharEdit, setBulkCharEdit] = useState({ id: null, oldName: '', value: '' }); 
   const [selectedPunchUps, setSelectedPunchUps] = useState([]);
 
-  // Sort Sketches Alphabetically
   const sortedSketches = [...sketches].sort((a, b) => {
     const titleA = (a.seriesTitle ? `${a.seriesTitle} - ${a.title}` : (a.title || 'Untitled')).toLowerCase();
     const titleB = (b.seriesTitle ? `${b.seriesTitle} - ${b.title}` : (b.title || 'Untitled')).toLowerCase();
@@ -373,12 +366,6 @@ const App = () => {
   const handleGuestEntry = () => {
     setIsGuest(true);
     localStorage.setItem('sketchbeans_is_guest', 'true');
-  };
-
-  const toggleAiState = () => {
-    const newState = !aiEnabled;
-    setAiEnabled(newState);
-    localStorage.setItem('sketchbeans_ai_enabled', newState.toString());
   };
 
   const updateContextState = (stateUpdater, isSketch) => {
@@ -694,7 +681,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "8.9", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "9.0", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -705,7 +692,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "8.9", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "9.0", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -815,6 +802,100 @@ const App = () => {
     }
   };
 
+  // --- LOCAL JS 1ST AD OPTIMIZER (100% OFFLINE) ---
+  const optimizeShootOrder = async (isPrintList = false) => {
+    const printTrigger = typeof isPrintList === 'boolean' ? isPrintList : false;
+    setLoadingStates(prev => ({ ...prev, optimizing: true }));
+    
+    // Fake a tiny calculation delay so the UI feels responsive
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    try {
+      const sceneOrder = [...new Set(activeShots.map(s => s.sceneHeading))];
+      let optimizedIds = [];
+
+      // Group by Scene first
+      sceneOrder.forEach(scene => {
+        const sceneShots = activeShots.filter(s => s.sceneHeading === scene);
+        const setups = [];
+        
+        // Group by Setup within the scene
+        sceneShots.forEach(shot => {
+          const setupKey = `${shot.locationCaveat || 'Base'}_${shot.type}`;
+          let setupGroup = setups.find(g => g.key === setupKey);
+          if (!setupGroup) {
+            setupGroup = { key: setupKey, shots: [] };
+            setups.push(setupGroup);
+          }
+          setupGroup.shots.push(shot);
+        });
+
+        // Flatten the array while maintaining the grouping
+        setups.forEach(setup => {
+          setup.shots.forEach((shot, index) => {
+            optimizedIds.push({
+              id: shot.id,
+              reason: index === 0 ? `Setup: ${shot.type} ${shot.locationCaveat ? `(${shot.locationCaveat})` : ''}` : `Continuing setup.`
+            });
+          });
+        });
+      });
+
+      // Auto Color Code the new setup blocks
+      const colors = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+      let colorIndex = -1;
+      let currentScene = '';
+      let currentType = '';
+      let currentLoc = '';
+
+      const colorMappedIds = optimizedIds.map((item, idx) => {
+        const foundShot = activeShots.find(s => s.id === item.id);
+        if (!foundShot) return null;
+
+        const isSameSetup = idx > 0 &&
+          foundShot.sceneHeading === currentScene &&
+          foundShot.type === currentType &&
+          (foundShot.locationCaveat || '') === currentLoc;
+
+        if (!isSameSetup) {
+           colorIndex = (colorIndex + 1) % colors.length;
+        }
+
+        currentScene = foundShot.sceneHeading;
+        currentType = foundShot.type;
+        currentLoc = foundShot.locationCaveat || '';
+
+        return {
+           ...foundShot,
+           shootOrderNumber: idx + 1,
+           optimizationReason: item.reason,
+           colorGroup: colors[colorIndex]
+        };
+      }).filter(s => s !== null);
+
+      // Batch update all shots so colors persist on the visual grid
+      updateContextState(prev => {
+        return prev.map(s => {
+          if (s.sketchId !== activeSketchId) return s;
+          const updated = colorMappedIds.find(mapped => mapped.id === s.id);
+          if (updated) {
+            return { ...s, colorGroup: updated.colorGroup };
+          }
+          return s;
+        });
+      }, false);
+
+      setShootPlanMeta(colorMappedIds);
+      
+      if (printTrigger) {
+        setPrintListMode('shoot-plan');
+      } else {
+        setBoardSubTab('shoot-plan');
+      }
+    } catch (err) { console.error(err); } 
+    finally { setLoadingStates(prev => ({ ...prev, optimizing: false })); }
+  };
+
   // --- AI ENGINE (API LOGIC) ---
   const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
     const activeKey = userApiKey.trim();
@@ -899,7 +980,6 @@ const App = () => {
     const shot = activeShots.find(s => s.id === shotId);
     let promptText = getShotPrompt(shot);
 
-    // --- FREE ENGINE BYPASS ---
     if (useFreeImageGen) {
       try {
         const aspectMap = { '16:9': {w: 800, h: 450}, '1:1': {w: 512, h: 512}, '4:3': {w: 800, h: 600}, '9:16': {w: 450, h: 800}, '3:4': {w: 600, h: 800} };
@@ -920,7 +1000,6 @@ const App = () => {
       return;
     }
 
-    // --- PAID ENGINE (IMAGEN) ---
     const maxRetries = 6; let delay = 3000;
     try {
       for (let i = 0; i < maxRetries; i++) {
@@ -954,7 +1033,7 @@ const App = () => {
           break; 
         } catch (error) {
           if (error.message === "404_MODEL_NOT_FOUND") {
-             alert(`Google returned a 404 error. Your API key likely doesn't have access to '${globalImageModel}'.\n\nFix: Ensure VITE_GEMINI_IMAGE_MODEL in Coolify is set correctly, or toggle on the Free Image Generator in the sidebar.`);
+             alert(`Google returned a 404 error. Your API key likely doesn't have access to '${globalImageModel}' yet.\n\nFix: I've updated the default to 'imagen-3.0-generate-001'. Check Coolify to ensure VITE_GEMINI_IMAGE_MODEL is set to that, or toggle on the Free Image Generator in the sidebar.`);
              break;
           }
           if (error.message === "FREE_TIER") {
@@ -1063,7 +1142,6 @@ const App = () => {
     } finally { setLoadingStates(prev => ({ ...prev, [`charImg-${charId}`]: false })); }
   };
 
-  // --- SCRIPT BREAKER LOGIC ---
   const analyzeScriptMetadata = async () => {
     if (!rawImportScript.trim()) return;
     setLoadingStates(prev => ({ ...prev, analyzeScript: true }));
@@ -1292,73 +1370,6 @@ const App = () => {
         }, false);
       }
     } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, singleAIShot: false })); }
-  };
-
-  const optimizeShootOrder = async (isPrintList = false) => {
-    const printTrigger = typeof isPrintList === 'boolean' ? isPrintList : false;
-    setLoadingStates(prev => ({ ...prev, optimizing: true }));
-    try {
-      const systemPrompt = `Expert 1st AD. Reorder shots into the most efficient SHOOT ORDER. 
-      CRITICAL INSTRUCTION: You MUST group shots together consecutively if they share the exact same 'Scene', 'Shot Type', and 'Location Caveat'. This minimizes moving the camera and lighting setups.
-      Return a JSON array of objects with 'id' and 'reason'. For grouped shots, make the reason explicitly clear that it is continuing the same camera setup.`;
-      
-      const prompt = `Scene: ${getFullTitle()}\nShots: ${activeShots.map(s => `ID: ${s.id}, Scene: ${s.sceneHeading}, Type: ${s.type}, Subject: ${s.subject}, Location Caveat: ${s.locationCaveat || 'Base'}, Chars: ${(s.shotCharacters||[]).join(',')}`).join('\n')}`;
-      const optimizedIds = await callGemini(prompt, systemPrompt, true);
-      
-      if (optimizedIds && Array.isArray(optimizedIds)) {
-        // Auto Color Code the new setup blocks
-        const colors = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
-        let colorIndex = -1;
-        let currentScene = '';
-        let currentType = '';
-        let currentLoc = '';
-
-        const colorMappedIds = optimizedIds.map((item, idx) => {
-          const foundShot = activeShots.find(s => s.id === item.id);
-          if (!foundShot) return null;
-
-          const isSameSetup = idx > 0 &&
-            foundShot.sceneHeading === currentScene &&
-            foundShot.type === currentType &&
-            (foundShot.locationCaveat || '') === currentLoc;
-
-          if (!isSameSetup) {
-             colorIndex = (colorIndex + 1) % colors.length;
-          }
-
-          currentScene = foundShot.sceneHeading;
-          currentType = foundShot.type;
-          currentLoc = foundShot.locationCaveat || '';
-
-          return {
-             ...foundShot,
-             shootOrderNumber: idx + 1,
-             optimizationReason: item.reason,
-             colorGroup: colors[colorIndex]
-          };
-        }).filter(s => s !== null);
-
-        // Batch update all shots so colors persist on the visual grid
-        updateContextState(prev => {
-          return prev.map(s => {
-            if (s.sketchId !== activeSketchId) return s;
-            const updated = colorMappedIds.find(mapped => mapped.id === s.id);
-            if (updated) {
-              return { ...s, colorGroup: updated.colorGroup };
-            }
-            return s;
-          });
-        }, false);
-
-        setShootPlanMeta(colorMappedIds);
-        
-        if (printTrigger) {
-          setPrintListMode('shoot-plan');
-        } else {
-          setBoardSubTab('shoot-plan');
-        }
-      }
-    } catch (err) { console.error(err); } finally { setLoadingStates(prev => ({ ...prev, optimizing: false })); }
   };
 
   const generateScriptFromShots = async () => {
@@ -1606,20 +1617,30 @@ const App = () => {
 
         <div className="border-t border-zinc-800 bg-zinc-950/50 flex flex-col">
           <div className="p-4 border-b border-zinc-800/50">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center gap-2">
-                {aiEnabled ? <Sparkles size={14}/> : <EyeOff size={14} className="text-zinc-500"/>} 
-                <span className={aiEnabled ? 'text-purple-500' : 'text-zinc-500'}>AI Assistant</span>
+                {aiMode !== 'manual' ? <Sparkles size={14}/> : <EyeOff size={14} className="text-zinc-500"/>} 
+                <span className={aiMode !== 'manual' ? 'text-purple-500' : 'text-zinc-500'}>Studio Rig Mode</span>
               </span>
-              <button 
-                onClick={toggleAiState}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${aiEnabled ? 'bg-purple-600' : 'bg-zinc-700'}`}
-              >
-                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${aiEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
             </div>
             
-            {aiEnabled && (
+            <div className="flex bg-zinc-900 rounded-lg p-1 border border-zinc-800 w-full relative">
+              <div className="absolute inset-y-1 w-1/3 transition-all duration-300 ease-out" style={{ left: aiMode === 'manual' ? '4px' : aiMode === 'supervisor' ? 'calc(33.333% + 1px)' : 'calc(66.666% - 2px)' }}>
+                 <div className={`w-full h-full rounded shadow-sm ${aiMode === 'manual' ? 'bg-zinc-700' : aiMode === 'supervisor' ? 'bg-blue-600' : 'bg-purple-600'}`}></div>
+              </div>
+              
+              <button onClick={() => {setAiMode('manual'); localStorage.setItem('sketchbeans_ai_mode', 'manual');}} className={`relative z-10 flex-1 py-1.5 text-[9px] font-black uppercase tracking-widest text-center transition-colors ${aiMode === 'manual' ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>Manual</button>
+              <button onClick={() => {setAiMode('supervisor'); localStorage.setItem('sketchbeans_ai_mode', 'supervisor');}} className={`relative z-10 flex-1 py-1.5 text-[9px] font-black uppercase tracking-widest text-center transition-colors ${aiMode === 'supervisor' ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>Super</button>
+              <button onClick={() => {setAiMode('cowriter'); localStorage.setItem('sketchbeans_ai_mode', 'cowriter');}} className={`relative z-10 flex-1 py-1.5 text-[9px] font-black uppercase tracking-widest text-center transition-colors ${aiMode === 'cowriter' ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>Co-Write</button>
+            </div>
+            
+            <div className="text-[8px] text-zinc-500 font-mono mt-3 text-center uppercase tracking-widest h-3 flex items-center justify-center">
+              {aiMode === 'manual' && "Pure offline manual rig."}
+              {aiMode === 'supervisor' && "Data Wrangling Only. No Generation."}
+              {aiMode === 'cowriter' && "Full Generative AI Unlocked."}
+            </div>
+
+            {aiMode === 'cowriter' && (
               <>
                 <div className="flex items-center justify-between mt-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
                   <span className={`text-[9px] font-black uppercase tracking-widest ${!useFreeImageGen ? 'text-purple-400' : 'text-zinc-600'}`}>PAID TIER</span>
@@ -1643,7 +1664,7 @@ const App = () => {
             )}
           </div>
 
-          {aiEnabled && (
+          {aiMode !== 'manual' && (
             <div className="p-4 border-b border-zinc-800/50 space-y-3 bg-zinc-900/30">
               <div className="text-[9px] text-zinc-500 leading-tight">
                 Paste your personal Gemini API key here to enable AI features.
@@ -1774,7 +1795,7 @@ const App = () => {
                       {history[`sketch-seriesPremise`] !== undefined && (
                         <button onClick={() => revertSketchField('seriesPremise')} className="p-1.5 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
                       )}
-                      {aiEnabled && (
+                      {aiMode === 'cowriter' && (
                         <button onClick={() => generateNarrativeBeat('seriesPremise')} disabled={!isRealUser || isAIBusy} className="p-1.5 hover:bg-purple-500/20 rounded transition-colors disabled:opacity-50 text-purple-500 flex items-center gap-1 text-[9px]">
                           {!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />} GENERATE
                         </button>
@@ -1792,7 +1813,7 @@ const App = () => {
                       {history[`sketch-premise`] !== undefined && (
                         <button onClick={() => revertSketchField('premise')} className="p-1.5 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
                       )}
-                      {aiEnabled && (
+                      {aiMode === 'cowriter' && (
                         <button onClick={() => generateNarrativeBeat('premise')} disabled={!isRealUser || isAIBusy} className="p-1.5 hover:bg-orange-500/20 rounded transition-colors disabled:opacity-50 text-orange-500 flex items-center gap-1 text-[9px]">
                           {!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />} GENERATE
                         </button>
@@ -1841,7 +1862,7 @@ const App = () => {
                 <div className="bg-zinc-900/20 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800 shadow-inner">
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Master Props List</span>
-                    {aiEnabled && (
+                    {aiMode !== 'manual' && (
                       <button onClick={autoExtractProps} disabled={!isRealUser || isAIBusy} className="text-[9px] font-black tracking-widest px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 rounded flex items-center gap-1.5 transition-colors disabled:opacity-50">
                         {loadingStates.extractProps ? <Loader2 size={12} className="animate-spin"/> : <Sparkles size={12}/>} AUTO-EXTRACT FROM SCRIPT
                       </button>
@@ -1887,7 +1908,7 @@ const App = () => {
                             <span>The {beat}</span>
                             <div className="flex items-center gap-1.5">
                               <button onClick={() => handleVoiceInput(activeSketch?.[beat], (val) => updateSketch(activeSketchId, beat, val), beat)} className={`p-1 hover:bg-zinc-800 rounded transition-colors ${activeMicId === beat ? 'text-red-500 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`}><Mic size={10}/></button>
-                              {aiEnabled && (
+                              {aiMode === 'cowriter' && (
                                 <button onClick={() => generateNarrativeBeat(beat)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-zinc-800 rounded transition-colors disabled:opacity-50 text-zinc-500 hover:text-white">
                                   {loadingStates[beat] ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
                                 </button>
@@ -1911,14 +1932,14 @@ const App = () => {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-800 pb-4">
                   <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800">
                     <button onClick={() => setScriptSubTab('editor')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors ${scriptSubTab === 'editor' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-zinc-500 hover:text-zinc-300'}`}>MANUAL SCRIPT</button>
-                    {aiEnabled && (
-                      <button onClick={() => setScriptSubTab('breaker')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors flex items-center gap-1.5 ${scriptSubTab === 'breaker' ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' : 'text-zinc-500 hover:text-zinc-300'}`}><Scissors size={12}/> AI SCRIPT BREAKER</button>
+                    {aiMode !== 'manual' && (
+                      <button onClick={() => setScriptSubTab('breaker')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors flex items-center gap-1.5 ${scriptSubTab === 'breaker' ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' : 'text-zinc-500 hover:text-zinc-300'}`}><Scissors size={12}/> SCRIPT BREAKER</button>
                     )}
                   </div>
                   
                   {scriptSubTab === 'editor' && (
                     <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
-                      {aiEnabled && (
+                      {aiMode === 'cowriter' && (
                         <>
                           <button onClick={draftScriptFromConfig} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-6 py-2.5 bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 rounded-full text-[10px] font-black transition-colors whitespace-nowrap shadow-[0_0_15px_rgba(37,99,235,0.5)] border border-blue-400">
                             {loadingStates.scriptDraft ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)} DRAFT FROM CONFIG
@@ -1936,7 +1957,7 @@ const App = () => {
                 {scriptSubTab === 'editor' && (
                   <div className="space-y-4">
                     <div className="bg-zinc-900/40 border border-zinc-800 rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 relative shadow-xl">
-                      {aiEnabled && (
+                      {aiMode === 'cowriter' && (
                         <button onClick={getPunchUpNotes} disabled={!isRealUser || isAIBusy || !activeSketch?.script} className="absolute top-4 right-4 md:top-6 md:right-6 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 rounded-full text-[10px] font-black shadow-lg border border-purple-400 flex items-center gap-2 transition-colors z-10 shadow-[0_0_15px_rgba(147,51,234,0.5)]">
                           {loadingStates.punchUp ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} PUNCH UP NOTES
                         </button>
@@ -1978,7 +1999,7 @@ const App = () => {
                   </div>
                 )}
 
-                {scriptSubTab === 'breaker' && aiEnabled && (
+                {scriptSubTab === 'breaker' && aiMode !== 'manual' && (
                   <div className="space-y-6">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                       <div>
@@ -2058,7 +2079,7 @@ const App = () => {
                     <p className="text-[10px] text-zinc-400 mt-1 uppercase tracking-widest">Changing a name here will auto-update the entire shot list and script.</p>
                   </div>
                   <div className="flex gap-2 w-full sm:w-auto">
-                    {aiEnabled && (
+                    {aiMode !== 'manual' && (
                       <button onClick={extractCharacters} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white border border-blue-400 rounded-full text-xs font-black transition-all shadow-[0_0_15px_rgba(37,99,235,0.5)] flex">
                         {loadingStates.extractChars ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} AUTO-EXTRACT
                       </button>
@@ -2084,7 +2105,7 @@ const App = () => {
                            <label htmlFor={`char-img-${char.id}`} className="absolute inset-0 bg-black/60 opacity-0 group-hover/avatar:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity z-10">
                               <Upload size={20} className="text-white"/>
                            </label>
-                           {aiEnabled && (
+                           {aiMode === 'cowriter' && (
                              <button onClick={() => generateCharAvatar(char.id)} disabled={!isRealUser || loadingStates[`charImg-${char.id}`]} className="absolute bottom-2 right-2 bg-purple-600/90 hover:bg-purple-500 p-2 rounded-full text-white shadow-lg opacity-0 group-hover/avatar:opacity-100 transition-opacity z-20 disabled:opacity-50" title="Generate AI Avatar">
                                {loadingStates[`charImg-${char.id}`] ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
                              </button>
@@ -2157,7 +2178,7 @@ const App = () => {
                         {history[`char-${char.id}-visualStyle`] !== undefined && (
                           <button onClick={() => revertCharTraits(char.id)} className="p-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-500 hover:text-zinc-300 transition-colors shadow-md" title="Undo AI edit"><Undo size={14}/></button>
                         )}
-                        {aiEnabled && (
+                        {aiMode === 'cowriter' && (
                           <button onClick={() => generateCharTraits(char.id)} disabled={!isRealUser || isAIBusy} className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-green-400 transition-colors disabled:opacity-50 shadow-md flex items-center gap-2" title="Generate character flaw">
                             {loadingStates[`char-${char.id}`] ? <Loader2 size={12} className="animate-spin text-green-500" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)} AI TOUCH-UP
                           </button>
@@ -2182,7 +2203,7 @@ const App = () => {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-800 pb-4 print:hidden">
                   <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800 overflow-x-auto w-full sm:w-auto">
                     <button onClick={() => setBoardSubTab('grid')} className={`px-4 py-1.5 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 ${boardSubTab === 'grid' ? 'bg-zinc-100 text-black shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}><Layout size={12}/> VISUAL GRID</button>
-                    <button onClick={() => { if(shootPlanMeta.length > 0) setBoardSubTab('shoot-plan'); else optimizeShootOrder(); }} disabled={!isRealUser && shootPlanMeta.length === 0 || isAIBusy} className={`px-6 py-2 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50 ${boardSubTab === 'shoot-plan' ? 'bg-yellow-500 text-black shadow-[0_0_15px_rgba(234,179,8,0.5)] border border-yellow-400' : 'bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20'}`}>
+                    <button onClick={() => optimizeShootOrder(false)} disabled={isAIBusy} className={`px-6 py-2 rounded-full text-xs font-black transition-colors whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50 ${boardSubTab === 'shoot-plan' ? 'bg-yellow-500 text-black shadow-[0_0_15px_rgba(234,179,8,0.5)] border border-yellow-400' : 'bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20'}`}>
                       {loadingStates.optimizing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} 1ST AD PLAN
                     </button>
                     <div className="w-px h-4 bg-zinc-700 mx-1 my-auto"></div>
@@ -2196,7 +2217,7 @@ const App = () => {
                         <Trash2 size={14}/> CLEAR BOARD
                       </button>
                     )}
-                    {boardSubTab === 'grid' && aiEnabled && (
+                    {boardSubTab === 'grid' && aiMode === 'cowriter' && (
                       <div className="flex bg-purple-600/20 border border-purple-500/30 rounded-full overflow-hidden shadow-lg shadow-purple-900/20 shrink-0">
                         <div className="flex items-center px-3 border-r border-purple-500/30 text-purple-400">
                           {loadingStates.genShots ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Sparkles size={12} />)}
@@ -2210,7 +2231,7 @@ const App = () => {
                     )}
                     {boardSubTab === 'shoot-plan' && (
                       <>
-                        <button onClick={() => optimizeShootOrder(false)} disabled={!isRealUser || isAIBusy} className="flex-1 sm:flex-none justify-center items-center gap-2 px-4 py-2 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border border-yellow-500/30 rounded-full text-[10px] font-black transition-all flex">
+                        <button onClick={() => optimizeShootOrder(false)} disabled={isAIBusy} className="flex-1 sm:flex-none justify-center items-center gap-2 px-4 py-2 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border border-yellow-500/30 rounded-full text-[10px] font-black transition-all flex">
                           {loadingStates.optimizing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCcw size={12} />} REASSESS
                         </button>
                         <button onClick={downloadShootPlan} className="flex-1 sm:flex-none justify-center items-center gap-2 px-4 py-2 bg-zinc-800 text-yellow-500 hover:bg-zinc-700 border border-zinc-700 rounded-full text-[10px] font-black transition-all flex"><Download size={12} /> SAVE TXT</button>
@@ -2312,7 +2333,7 @@ const App = () => {
                                           <Upload size={10} /> UPLOAD
                                           <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(shot.id, e)} />
                                         </label>
-                                        {aiEnabled && (
+                                        {aiMode === 'cowriter' && (
                                           <div className="flex gap-2">
                                             <button onClick={() => setVisiblePromptId(shot.id)} className="text-[9px] font-black text-zinc-600 hover:text-purple-400 flex items-center gap-1 transition-colors uppercase tracking-widest bg-zinc-900 px-3 py-1.5 rounded border border-zinc-800"><FileText size={10} /> PROMPT</button>
                                             <button onClick={() => generateImage(shot.id)} disabled={(!isPersonalKeyActive && !useFreeImageGen) || loadingStates[`image-${shot.id}`] || isAIBusy} className={`text-[9px] font-black flex items-center gap-1 transition-colors uppercase tracking-widest px-3 py-1.5 rounded border ${isPersonalKeyActive || useFreeImageGen ? 'text-zinc-300 bg-purple-600/20 border-purple-500/30 hover:bg-purple-600 hover:text-white' : 'text-zinc-600 bg-zinc-900 border-zinc-800 opacity-50'}`} title={!isPersonalKeyActive && !useFreeImageGen ? "Requires personal API Key in sidebar" : "Generate Image"}>
@@ -2378,7 +2399,7 @@ const App = () => {
                                       {history[`shot-${shot.id}-action`] !== undefined && (
                                         <button onClick={() => revertShotField(shot.id, 'action')} className="p-1 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
                                       )}
-                                      {aiEnabled && (
+                                      {aiMode === 'cowriter' && (
                                         <button onClick={() => generateTextAssist(shot.id, 'action', 'Director blocking physical comedy. Write in screenplay format.', `Describe exactly what we SEE. Focus on specific physical action, props, and facial expressions. Max 1-2 brief sentences.`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-orange-500/20 rounded disabled:opacity-50 shrink-0 text-orange-500">{loadingStates[`action-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Clapperboard size={12} />)}</button>
                                       )}
                                     </div>
@@ -2395,7 +2416,7 @@ const App = () => {
                                         {history[`shot-${shot.id}-dialogue`] !== undefined && (
                                           <button onClick={() => revertShotField(shot.id, 'dialogue')} className="p-1 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
                                         )}
-                                        {aiEnabled && (
+                                        {aiMode === 'cowriter' && (
                                           <button onClick={() => generateTextAssist(shot.id, 'dialogue', 'Writer drafting dialogue.', `Write a single punchy line of dialogue, or a brief improv prompt. Max 1-2 sentences. DO NOT write a full script format.`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-purple-500/20 rounded disabled:opacity-50 shrink-0 text-purple-500">{loadingStates[`dialogue-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Quote size={12} />)}</button>
                                         )}
                                       </div>
@@ -2410,7 +2431,7 @@ const App = () => {
                                         {history[`shot-${shot.id}-notes`] !== undefined && (
                                           <button onClick={() => revertShotField(shot.id, 'notes')} className="p-1 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
                                         )}
-                                        {aiEnabled && (
+                                        {aiMode === 'cowriter' && (
                                           <button onClick={() => generateTextAssist(shot.id, 'notes', 'DP advising on camera/light.', `Focus on lighting, lens choice, and camera movement. Max 1-2 brief sentences.`)} disabled={!isRealUser || isAIBusy} className="p-1 hover:bg-blue-500/20 rounded disabled:opacity-50 shrink-0 text-blue-500">{loadingStates[`notes-${shot.id}`] ? <Loader2 size={12} className="animate-spin" /> : (!isRealUser ? <Lock size={12} /> : <Wand2 size={12} />)}</button>
                                         )}
                                       </div>
@@ -2454,7 +2475,7 @@ const App = () => {
                       <button onClick={addShot} className="w-full py-8 border-2 border-dashed border-zinc-800 rounded-[2rem] md:rounded-[3rem] text-zinc-600 hover:text-orange-500 hover:border-orange-500/50 hover:bg-orange-500/5 transition-all flex flex-col items-center justify-center gap-3 font-black tracking-widest group">
                         <div className="bg-zinc-900 group-hover:bg-orange-500/20 p-4 rounded-full"><Plus size={24} className="text-zinc-500 group-hover:text-orange-500" /></div> ADD SHOT AT BOTTOM
                       </button>
-                      {aiEnabled && (
+                      {aiMode === 'cowriter' && (
                         <button onClick={generateSingleAIShot} disabled={!isRealUser || isAIBusy} className="w-full py-8 border-2 border-dashed border-purple-900/50 rounded-[2rem] md:rounded-[3rem] text-purple-600/50 hover:text-purple-400 hover:border-purple-500/50 hover:bg-purple-500/5 transition-all flex flex-col items-center justify-center gap-3 font-black tracking-widest group disabled:opacity-50">
                           <div className="bg-purple-900/20 group-hover:bg-purple-500/20 p-4 rounded-full">
                             {loadingStates.singleAIShot ? <Loader2 size={24} className="animate-spin text-purple-500" /> : (!isRealUser ? <Lock size={24} /> : <Sparkles size={24} className="text-purple-500 group-hover:text-purple-400" />)}
