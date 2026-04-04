@@ -8,8 +8,6 @@ import {
   UserPlus, ArrowUp, ArrowDown, Cloud, GitBranch, LogOut, Lock, Copy, Menu,
   ScrollText, VenetianMask, Clapperboard, Key, EyeOff, User, Settings2, Users, Settings, Video, RefreshCcw, ArrowDownToLine, ArrowUpFromLine, Undo, Scissors, CheckCircle2, Film, Unlock
 } from 'lucide-react';
-import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
@@ -21,35 +19,17 @@ import {
   getFirestore, collection, doc, setDoc, onSnapshot, deleteDoc, writeBatch
 } from 'firebase/firestore';
 
-declare global {
-  var __firebase_config: string | undefined;
-  var __app_id: string | undefined;
-  var __initial_auth_token: string | undefined;
-  interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
-  }
-}
-
-interface ImportMetaEnv {
-  [key: string]: any;
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
-}
-
 // --- ENVIRONMENT INITIALIZATION ---
-let firebaseConfig: any = {};
+let firebaseConfig = {};
 let globalTextModel = "gemini-flash-latest"; 
 let globalImageModel = "imagen-3.0-generate-001"; // Defaulted to 3.0 to prevent 404 preview blocks
 let globalFreeImageUrl = "https://image.pollinations.ai/prompt/"; // Default free endpoint
 
 try {
-  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
-    if ((import.meta as any).env.VITE_GEMINI_TEXT_MODEL) globalTextModel = (import.meta as any).env.VITE_GEMINI_TEXT_MODEL;
-    if ((import.meta as any).env.VITE_GEMINI_IMAGE_MODEL) globalImageModel = (import.meta as any).env.VITE_GEMINI_IMAGE_MODEL;
-    if ((import.meta as any).env.VITE_FREE_IMAGE_URL) globalFreeImageUrl = (import.meta as any).env.VITE_FREE_IMAGE_URL;
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    if (import.meta.env.VITE_GEMINI_TEXT_MODEL) globalTextModel = import.meta.env.VITE_GEMINI_TEXT_MODEL;
+    if (import.meta.env.VITE_GEMINI_IMAGE_MODEL) globalImageModel = import.meta.env.VITE_GEMINI_IMAGE_MODEL;
+    if (import.meta.env.VITE_FREE_IMAGE_URL) globalFreeImageUrl = import.meta.env.VITE_FREE_IMAGE_URL;
   }
 } catch (e) { /* Ignore */ }
 
@@ -58,32 +38,19 @@ if (typeof __firebase_config !== 'undefined') {
 } else {
   try {
     firebaseConfig = {
-      apiKey: (import.meta as any).env.VITE_FIREBASE_API_KEY,
-      authDomain: (import.meta as any).env.VITE_FIREBASE_AUTH_DOMAIN,
-      projectId: (import.meta as any).env.VITE_FIREBASE_PROJECT_ID,
-      storageBucket: (import.meta as any).env.VITE_FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: (import.meta as any).env.VITE_FIREBASE_SENDER_ID,
-      appId: (import.meta as any).env.VITE_FIREBASE_APP_ID
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: import.meta.env.VITE_FIREBASE_SENDER_ID,
+      appId: import.meta.env.VITE_FIREBASE_APP_ID
     };
   } catch (e) { /* Ignore in strict environments */ }
 }
 
-let app: any;
-let auth: any;
-let db: any;
-
-try {
-  if (firebaseConfig && firebaseConfig.projectId) {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-  } else {
-    console.warn("Firebase config is missing projectId. Firebase will not be initialized.");
-  }
-} catch (e) {
-  console.error("Failed to initialize Firebase:", e);
-}
-
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'sketchbeans-app';
 
 const SHOT_TYPES = ['Wide', 'Medium', 'Close Up', 'POV', 'Over the Shoulder', 'Insert', 'Drone', 'Tracking'];
@@ -279,7 +246,6 @@ const App = () => {
   const [aiMode, setAiMode] = useState(localStorage.getItem('sketchbeans_ai_mode') || 'manual');
   const [useFreeImageGen, setUseFreeImageGen] = useState(localStorage.getItem('sb_free_img') === 'true');
   const [history, setHistory] = useState({});
-  const [showSeriesControls, setShowSeriesControls] = useState(localStorage.getItem('sketchbeans_show_series') === 'true');
 
   const [isSyncing, setIsSyncing] = useState(false);
   const isInitialLoad = useRef({ sketches: true, shots: true });
@@ -335,10 +301,6 @@ const App = () => {
 
   useEffect(() => {
     let isMounted = true;
-    if (!auth) {
-      setAuthResolved(true);
-      return;
-    }
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => { 
       if (currentUser) {
         if (isMounted) {
@@ -357,7 +319,7 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!user || !isRealUser || !db) return;
+    if (!user || !isRealUser) return;
     const trackPresence = async () => {
       try {
         const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
@@ -368,7 +330,7 @@ const App = () => {
   }, [isRealUser, user]);
 
   useEffect(() => {
-    if (!user || !isRealUser || !db) return;
+    if (!user || !isRealUser) return;
     
     const unsubSketches = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'sketches'), (snap) => {
       if (isInitialLoad.current.sketches) {
@@ -387,8 +349,8 @@ const App = () => {
   }, [isRealUser, user]);
 
   const loginWithProvider = async () => {
-    if (!auth || !firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('your_key_here')) {
-      return alert("🚨 FATAL RIG ERROR: Your Firebase API Key or Project ID is missing!");
+    if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('your_key_here')) {
+      return alert("🚨 FATAL RIG ERROR: Your Firebase API Key is missing!");
     }
     const provider = new GoogleAuthProvider();
     try { 
@@ -540,7 +502,7 @@ const App = () => {
 
   const deleteShot = async (shotId) => {
     updateContextState(prev => prev.filter(s => s.id !== shotId), false);
-    if (user && isRealUser && db) try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', shotId)); } catch (e) {}
+    if (user && isRealUser) try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'shots', shotId)); } catch (e) {}
   };
 
   const clearAllShots = async () => {
@@ -548,7 +510,7 @@ const App = () => {
     const shotsToDelete = activeShots.map(s => s.id);
     updateContextState(prev => prev.filter(s => s.sketchId !== activeSketchId), false);
     
-    if (user && isRealUser && db) {
+    if (user && isRealUser) {
       try {
         let batch = writeBatch(db);
         let count = 0;
@@ -602,7 +564,7 @@ const App = () => {
     
     setSketches(updatedSketches);
     setShots(prev => prev.filter(s => s.sketchId !== id));
-    if (user && isRealUser && db) try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', id)); } catch (err) {}
+    if (user && isRealUser) try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', id)); } catch (err) {}
     setSketchToDelete(null);
   };
 
@@ -621,7 +583,7 @@ const App = () => {
     setActiveSketchId(newId);
     if (window.innerWidth < 768) setSidebarOpen(false);
 
-    if (user && isRealUser && db) {
+    if (user && isRealUser) {
       setIsSyncing(true);
       try {
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sketches', newId), clonedSketch);
@@ -631,7 +593,7 @@ const App = () => {
   };
 
   const pushToCloud = async (silent = false) => {
-    if (!user || !isRealUser || !db) return;
+    if (!user || !isRealUser) return;
     if (!silent) setIsSyncing(true);
 
     try {
@@ -669,7 +631,7 @@ const App = () => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
-      const rawImageUrl = e.target?.result as string;
+      const rawImageUrl = e.target.result;
       setFullResImages(prev => ({ ...prev, [shotId]: rawImageUrl }));
 
       const img = new Image();
@@ -703,7 +665,7 @@ const App = () => {
         const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
         updateChar(charId, 'image', canvas.toDataURL('image/jpeg', 0.8));
       };
-      img.src = e.target?.result as string;
+      img.src = e.target.result;
     };
     reader.readAsDataURL(file);
   };
@@ -746,7 +708,7 @@ const App = () => {
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const content = JSON.parse(e.target?.result as string);
+        const content = JSON.parse(e.target?.result);
         if (content.sketches && content.shots) {
           const importId = Date.now().toString();
           
@@ -761,7 +723,7 @@ const App = () => {
           setShots(prev => [...prev, ...newShots]);
           if (newSketches.length > 0) setActiveSketchId(newSketches[0].id);
 
-          if (user && isRealUser && db) {
+          if (user && isRealUser) {
             setIsSyncing(true);
             try {
               let batch = writeBatch(db);
@@ -837,40 +799,6 @@ const App = () => {
       window.open(imageUrl, '_blank'); 
     } else {
       const link = document.createElement('a'); link.href = imageUrl; link.download = `SketchBeans_Shot_${shotNumber}.png`; link.click();
-    }
-  };
-
-  const downloadAllImagesZip = async () => {
-    if (!activeShots || activeShots.length === 0) return alert("No shots to download.");
-    let hasImages = false;
-    const zip = new JSZip();
-    const safeTitle = getFullTitle().replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'project';
-    const folder = zip.folder(safeTitle);
-
-    activeShots.forEach((shot) => {
-      const imageUrl = fullResImages[shot.id] || shot.image;
-      if (imageUrl && !imageUrl.startsWith('http')) {
-        const base64Data = imageUrl.split(',')[1];
-        if (base64Data) {
-          const shotNum = String(shot.number).padStart(3, '0');
-          const safeSubject = (shot.subject || 'shot').replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 30);
-          folder.file(`${shotNum}_${safeSubject}.jpg`, base64Data, { base64: true });
-          hasImages = true;
-        }
-      }
-    });
-
-    if (!hasImages) return alert("No generated images found to download.");
-
-    setLoadingStates(prev => ({ ...prev, zip: true }));
-    try {
-      const content = await zip.generateAsync({ type: 'blob' });
-      saveAs(content, `${safeTitle}_images.zip`);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to generate ZIP file.");
-    } finally {
-      setLoadingStates(prev => ({ ...prev, zip: false }));
     }
   };
 
@@ -981,7 +909,7 @@ const App = () => {
     try {
       for (let i = 0; i < maxRetries; i++) {
         try {
-          const payload: any = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
+          const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
           if (isJson) payload.generationConfig = { responseMimeType: "application/json" };
           
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${globalTextModel}:generateContent?key=${activeKey}`, {
@@ -1664,16 +1592,11 @@ const App = () => {
         <nav className="flex-1 overflow-y-auto px-3 space-y-1 pb-4">
           <div className="text-[10px] font-black text-zinc-600 uppercase tracking-widest px-3 mb-2">My Projects</div>
           {sortedSketches.map(sketch => {
-            const isSeries = !!sketch.seriesTitle;
             const sidebarTitle = sketch.seriesTitle ? `${sketch.seriesTitle} - ${sketch.title}` : (sketch.title || 'Untitled');
             return (
-            <div key={sketch.id} className={`w-full group text-left px-3 py-2 rounded-lg flex items-center justify-between transition-colors ${activeSketchId === sketch.id ? 'bg-zinc-800 text-orange-400' : 'text-zinc-400 hover:bg-zinc-800/50'} ${isSeries ? 'border-l-[3px] border-purple-500 bg-purple-500/5' : ''}`}>
+            <div key={sketch.id} className={`w-full group text-left px-3 py-2 rounded-lg flex items-center justify-between transition-colors ${activeSketchId === sketch.id ? 'bg-zinc-800 text-orange-400' : 'text-zinc-400 hover:bg-zinc-800/50'}`}>
               <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0 overflow-x-hidden hover:overflow-x-auto scrollbar-hide whitespace-nowrap" title={sidebarTitle}>
-                {isSeries ? <Clapperboard size={16} className={`shrink-0 ${activeSketchId === sketch.id ? 'text-purple-400' : 'text-purple-500/70'}`} /> : <FileText size={16} className="shrink-0" />} 
-                <span className="font-medium text-sm flex flex-col items-start leading-tight min-w-0 w-full">
-                  {isSeries && <span className={`text-[9px] font-black uppercase tracking-widest truncate w-full text-left ${activeSketchId === sketch.id ? 'text-purple-400' : 'text-purple-500/70'}`}>{sketch.seriesTitle}</span>}
-                  <span className="truncate w-full text-left">{sketch.title || 'Untitled'}</span>
-                </span>
+                <FileText size={16} className="shrink-0" /> <span className="font-medium text-sm">{sidebarTitle}</span>
               </button>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2 shrink-0 bg-gradient-to-r from-transparent to-zinc-900">
                 <button onClick={(e) => { e.stopPropagation(); cloneSketchAsEpisode(sketch); }} className="hover:text-green-400 p-1.5" title="Duplicate as New Episode">
@@ -1787,9 +1710,6 @@ const App = () => {
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/50">
               <button onClick={exportSnapshot} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-orange-400 border border-zinc-800 rounded-lg transition-all"><Download size={10} /> BACKUP ALL</button>
               <button onClick={handleImportClick} className="flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-purple-400 border border-zinc-800 rounded-lg transition-all" title="Appends file to your current rig"><Upload size={10} /> IMPORT</button>
-              <button onClick={downloadAllImagesZip} className="col-span-2 flex justify-center items-center gap-2 px-2 py-2 text-[9px] font-black text-zinc-500 hover:text-green-400 border border-zinc-800 rounded-lg transition-all">
-                {loadingStates.zip ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />} ZIP IMAGES
-              </button>
             </div>
             <input type="file" ref={fileInputRef} onChange={importSnapshot} accept=".json" className="hidden" />
           </div>
@@ -1850,22 +1770,16 @@ const App = () => {
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
                 <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
                   <h2 className="text-xl md:text-2xl font-black uppercase tracking-tighter text-orange-500 flex items-center gap-2"><Settings2 size={24} /> Project Configuration</h2>
-                  <label className="flex items-center gap-2 text-xs font-bold text-zinc-400 cursor-pointer hover:text-zinc-200">
-                    <input type="checkbox" checked={showSeriesControls} onChange={(e) => { setShowSeriesControls(e.target.checked); localStorage.setItem('sketchbeans_show_series', e.target.checked.toString()); }} className="accent-purple-500 w-4 h-4 rounded" />
-                    Show Series Controls
-                  </label>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {showSeriesControls && (
-                    <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
-                      <label className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center justify-between mb-2">
-                        <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Series Title</span>
-                      </label>
-                      <input value={activeSketch?.seriesTitle || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesTitle', e.target.value)} placeholder="Series Name..." className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 text-xl font-black focus:outline-none focus:border-purple-500/50 text-zinc-200" />
-                    </div>
-                  )}
-                  <div className={`space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative ${!showSeriesControls ? 'col-span-1 md:col-span-2' : ''}`}>
+                  <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
+                    <label className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Series Title</span>
+                    </label>
+                    <input value={activeSketch?.seriesTitle || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesTitle', e.target.value)} placeholder="Series Name..." className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 text-xl font-black focus:outline-none focus:border-purple-500/50 text-zinc-200" />
+                  </div>
+                  <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
                     <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
                       <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> Episode / Sketch Title</span>
                     </label>
@@ -1873,25 +1787,23 @@ const App = () => {
                   </div>
                 </div>
 
-                {showSeriesControls && (
-                  <div className="space-y-2 bg-zinc-900/20 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 border-dashed">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between mb-2">
-                      <span className="flex items-center gap-2">Series Engine / Recurring Formula (Optional)</span>
-                      <div className="flex items-center gap-1.5">
-                        <button onClick={() => handleVoiceInput(activeSketch?.seriesPremise, (val) => updateSketch(activeSketchId, 'seriesPremise', val), 'seriesPremise')} className={`p-1.5 rounded transition-colors ${activeMicId === 'seriesPremise' ? 'bg-red-500/20 text-red-500 animate-pulse' : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
-                        {history[`sketch-seriesPremise`] !== undefined && (
-                          <button onClick={() => revertSketchField('seriesPremise')} className="p-1.5 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
-                        )}
-                        {aiMode === 'cowriter' && (
-                          <button onClick={() => generateNarrativeBeat('seriesPremise')} disabled={!isRealUser || isAIBusy} className="p-1.5 hover:bg-purple-500/20 rounded transition-colors disabled:opacity-50 text-purple-500 flex items-center gap-1 text-[9px]">
-                            {!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />} GENERATE
-                          </button>
-                        )}
-                      </div>
-                    </label>
-                    <textarea value={activeSketch?.seriesPremise || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesPremise', e.target.value)} placeholder="If this is part of a recurring series, describe the master formula here. (e.g. In every episode, two inept cops try to interrogate a completely innocent object.)" className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 md:p-6 text-sm focus:outline-none focus:border-zinc-500/50 min-h-[80px] resize-y text-zinc-400 italic" />
-                  </div>
-                )}
+                <div className="space-y-2 bg-zinc-900/20 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 border-dashed">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between mb-2">
+                    <span className="flex items-center gap-2">Series Engine / Recurring Formula (Optional)</span>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => handleVoiceInput(activeSketch?.seriesPremise, (val) => updateSketch(activeSketchId, 'seriesPremise', val), 'seriesPremise')} className={`p-1.5 rounded transition-colors ${activeMicId === 'seriesPremise' ? 'bg-red-500/20 text-red-500 animate-pulse' : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
+                      {history[`sketch-seriesPremise`] !== undefined && (
+                        <button onClick={() => revertSketchField('seriesPremise')} className="p-1.5 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
+                      )}
+                      {aiMode === 'cowriter' && (
+                        <button onClick={() => generateNarrativeBeat('seriesPremise')} disabled={!isRealUser || isAIBusy} className="p-1.5 hover:bg-purple-500/20 rounded transition-colors disabled:opacity-50 text-purple-500 flex items-center gap-1 text-[9px]">
+                          {!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />} GENERATE
+                        </button>
+                      )}
+                    </div>
+                  </label>
+                  <textarea value={activeSketch?.seriesPremise || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesPremise', e.target.value)} placeholder="If this is part of a recurring series, describe the master formula here. (e.g. In every episode, two inept cops try to interrogate a completely innocent object.)" className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 md:p-6 text-sm focus:outline-none focus:border-zinc-500/50 min-h-[80px] resize-y text-zinc-400 italic" />
+                </div>
 
                 <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
                   <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
