@@ -6,7 +6,7 @@ import {
   X, Download, Upload, Save, Maximize2, Map, 
   ChevronUp, ChevronDown, Clock, ListVideo, Mic,
   UserPlus, ArrowUp, ArrowDown, Cloud, GitBranch, LogOut, Lock, Copy, Menu,
-  ScrollText, VenetianMask, Clapperboard, Key, EyeOff, User, Settings2, Users, Settings, Video, RefreshCcw, ArrowDownToLine, ArrowUpFromLine, Undo, Scissors, CheckCircle2, Film, Unlock
+  ScrollText, VenetianMask, Clapperboard, Key, EyeOff, User, Settings2, Users, Settings, Video, RefreshCcw, ArrowDownToLine, ArrowUpFromLine, Undo, Scissors, CheckCircle2, Film, Unlock, Tv, FolderArchive
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -207,7 +207,7 @@ const App = () => {
   const isRealUser = user && !user.isAnonymous;
 
   const [sketches, setSketches] = useState([{ 
-    id: '1', seriesTitle: 'SKETCHBEANS', title: 'The Production Rig', 
+    id: '1', isSeries: true, seriesTitle: 'SKETCHBEANS', title: 'The Production Rig', 
     seriesPremise: '', premise: 'A director discovers a digital production rig that does the heavy lifting of pre-production, allowing them to visualize their absurd ideas instantly.',
     genre: 'Comedy', tone: 'Cinematic', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', props: ['Coffee cup', 'Mechanical keyboard'],
     characterProfiles: [
@@ -258,9 +258,10 @@ const App = () => {
   const [bulkCharEdit, setBulkCharEdit] = useState({ id: null, oldName: '', value: '' }); 
   const [selectedPunchUps, setSelectedPunchUps] = useState([]);
 
+  // Sort Sketches Alphabetically
   const sortedSketches = [...sketches].sort((a, b) => {
-    const titleA = (a.seriesTitle ? `${a.seriesTitle} - ${a.title}` : (a.title || 'Untitled')).toLowerCase();
-    const titleB = (b.seriesTitle ? `${b.seriesTitle} - ${b.title}` : (b.title || 'Untitled')).toLowerCase();
+    const titleA = (a.isSeries && a.seriesTitle ? `${a.seriesTitle} - ${a.title}` : (a.title || 'Untitled')).toLowerCase();
+    const titleB = (b.isSeries && b.seriesTitle ? `${b.seriesTitle} - ${b.title}` : (b.title || 'Untitled')).toLowerCase();
     return titleA.localeCompare(titleB);
   });
 
@@ -290,7 +291,7 @@ const App = () => {
     return `${c.name}${details.length > 0 ? ` [${details.join(', ')}]` : ''} - Wardrobe/Visuals: ${c.visualStyle || ''} - Personality: ${c.personality || ''}`;
   }).join(' | ');
 
-  const getFullTitle = () => activeSketch?.seriesTitle ? `${activeSketch.seriesTitle} - ${activeSketch.title}` : (activeSketch?.title || 'Untitled Project');
+  const getFullTitle = () => activeSketch?.isSeries && activeSketch?.seriesTitle ? `${activeSketch.seriesTitle} - ${activeSketch.title}` : (activeSketch?.title || 'Untitled Project');
 
   useEffect(() => {
     if (activeSketchId) localStorage.setItem('sketchbeans_active_sketch', activeSketchId);
@@ -558,7 +559,7 @@ const App = () => {
     const updatedSketches = sketches.filter(s => s.id !== id);
     if (updatedSketches.length === 0) {
       const newId = Date.now().toString();
-      updatedSketches.push({ id: newId, seriesTitle: '', title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: [] });
+      updatedSketches.push({ id: newId, isSeries: false, seriesTitle: '', title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: [] });
       setActiveSketchId(newId);
     } else if (activeSketchId === id) setActiveSketchId(updatedSketches[0].id);
     
@@ -681,7 +682,7 @@ const App = () => {
   };
 
   const exportSnapshot = () => {
-    const data = { version: "9.0", timestamp: new Date().toISOString(), sketches, shots };
+    const data = { version: "9.1", timestamp: new Date().toISOString(), sketches, shots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = `SketchBeans_FullBackup_${new Date().getTime()}.json`;
@@ -692,7 +693,7 @@ const App = () => {
     const targetSketch = sketches.find(s => s.id === sketchId);
     const targetShots = shots.filter(s => s.sketchId === sketchId);
     if (!targetSketch) return;
-    const data = { version: "9.0", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
+    const data = { version: "9.1", timestamp: new Date().toISOString(), sketches: [targetSketch], shots: targetShots };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; 
@@ -799,6 +800,71 @@ const App = () => {
       window.open(imageUrl, '_blank'); 
     } else {
       const link = document.createElement('a'); link.href = imageUrl; link.download = `SketchBeans_Shot_${shotNumber}.png`; link.click();
+    }
+  };
+
+  // HELPER: Zip All Images securely using JSZip dynamic import
+  const downloadAllImagesAsZip = async () => {
+    setLoadingStates(prev => ({...prev, zip: true}));
+    try {
+      let JSZip;
+      try {
+        const module = await import('jszip');
+        JSZip = module.default || module;
+      } catch (e) {
+        const module = await import('https://esm.sh/jszip');
+        JSZip = module.default;
+      }
+
+      const zip = new JSZip();
+      const safeProjectTitle = (activeSketch?.title || 'SketchBeans').replace(/[^a-z0-9]/gi, '_');
+      const mainFolder = zip.folder(`${safeProjectTitle}_Assets`);
+      const boardFolder = mainFolder.folder('Storyboard_Frames');
+      
+      let hasImages = false;
+
+      activeShots.forEach(shot => {
+        const imageUrl = fullResImages[shot.id] || shot.image;
+        if (imageUrl && imageUrl.startsWith('data:image')) {
+          hasImages = true;
+          const base64Data = imageUrl.replace(/^data:image\/(png|jpeg|jpg);base64,/, "");
+          const safeHeading = (shot.sceneHeading || 'Scene').replace(/[^a-z0-9]/gi, '_');
+          const safeType = (shot.type || 'Shot').replace(/[^a-z0-9]/gi, '_');
+          const fileName = `Shot_${String(shot.number).padStart(3, '0')}_${safeHeading}_${safeType}.jpg`;
+          boardFolder.file(fileName, base64Data, {base64: true});
+        }
+      });
+
+      const charFolder = mainFolder.folder('Character_Profiles');
+      activeProfiles.forEach(char => {
+        if (char.image && char.image.startsWith('data:image')) {
+           hasImages = true;
+           const base64Data = char.image.replace(/^data:image\/(png|jpeg|jpg);base64,/, "");
+           const safeName = (char.name || 'Character').replace(/[^a-z0-9]/gi, '_');
+           charFolder.file(`${safeName}.jpg`, base64Data, {base64: true});
+        }
+      });
+
+      if (!hasImages) {
+        alert("There are no generated images or avatars on this board to zip.");
+        setLoadingStates(prev => ({...prev, zip: false}));
+        return;
+      }
+
+      const content = await zip.generateAsync({type: "blob"});
+      const url = URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${safeProjectTitle}_Assets.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to zip images. Are you missing the JSZip package? Run 'npm install jszip' if you are hosting this locally.`);
+    } finally {
+      setLoadingStates(prev => ({...prev, zip: false}));
     }
   };
 
@@ -960,7 +1026,7 @@ const App = () => {
 
     let prompt = `CRITICAL INSTRUCTION: Generate a SINGLE, borderless, full-bleed image. ABSOLUTELY NO TEXT, NO BORDERS, NO ARROWS, NO WATERMARKS, NO STORYBOARD MARKS. Just the pure artwork.\n\n`;
     prompt += `VISUAL STYLE: ${stylePrefix}\n\n`;
-    prompt += `SCENE CONTEXT: ${activeSketch?.seriesPremise ? `[Series Formula: ${activeSketch.seriesPremise}] ` : ''}${activeSketch?.premise || activeSketch?.title}\n`;
+    prompt += `SCENE CONTEXT: ${activeSketch?.isSeries && activeSketch?.seriesPremise ? `[Series Formula: ${activeSketch.seriesPremise}] ` : ''}${activeSketch?.premise || activeSketch?.title}\n`;
     prompt += `LOCATION: ${location}\n\n`;
     prompt += `IMAGE TO GENERATE: A ${shot.type || 'Medium'} shot of ${shot.subject || 'subject'}. `;
     if (shot.cameraMove && shot.cameraMove !== 'Locked Off') prompt += `The camera is moving: ${shot.cameraMove}. `;
@@ -980,6 +1046,7 @@ const App = () => {
     const shot = activeShots.find(s => s.id === shotId);
     let promptText = getShotPrompt(shot);
 
+    // --- FREE ENGINE BYPASS ---
     if (useFreeImageGen) {
       try {
         const aspectMap = { '16:9': {w: 800, h: 450}, '1:1': {w: 512, h: 512}, '4:3': {w: 800, h: 600}, '9:16': {w: 450, h: 800}, '3:4': {w: 600, h: 800} };
@@ -1000,6 +1067,7 @@ const App = () => {
       return;
     }
 
+    // --- PAID ENGINE (IMAGEN) ---
     const maxRetries = 6; let delay = 3000;
     try {
       for (let i = 0; i < maxRetries; i++) {
@@ -1592,11 +1660,15 @@ const App = () => {
         <nav className="flex-1 overflow-y-auto px-3 space-y-1 pb-4">
           <div className="text-[10px] font-black text-zinc-600 uppercase tracking-widest px-3 mb-2">My Projects</div>
           {sortedSketches.map(sketch => {
-            const sidebarTitle = sketch.seriesTitle ? `${sketch.seriesTitle} - ${sketch.title}` : (sketch.title || 'Untitled');
+            const sidebarTitle = sketch.isSeries && sketch.seriesTitle ? `${sketch.seriesTitle} - ${sketch.title}` : (sketch.title || 'Untitled');
             return (
             <div key={sketch.id} className={`w-full group text-left px-3 py-2 rounded-lg flex items-center justify-between transition-colors ${activeSketchId === sketch.id ? 'bg-zinc-800 text-orange-400' : 'text-zinc-400 hover:bg-zinc-800/50'}`}>
-              <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0 overflow-x-hidden hover:overflow-x-auto scrollbar-hide whitespace-nowrap" title={sidebarTitle}>
-                <FileText size={16} className="shrink-0" /> <span className="font-medium text-sm">{sidebarTitle}</span>
+              <button onClick={() => { setActiveSketchId(sketch.id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden whitespace-nowrap" title={sidebarTitle}>
+                {sketch.isSeries ? <Tv size={16} className="shrink-0 text-purple-500" /> : <Clapperboard size={16} className="shrink-0 text-orange-500" />} 
+                <div className="flex flex-col min-w-0 w-full text-left">
+                  {sketch.isSeries && <span className="text-[9px] font-black text-purple-400 uppercase tracking-widest leading-none mb-0.5 truncate">{sketch.seriesTitle || 'Unnamed Series'}</span>}
+                  <span className="font-medium text-sm leading-tight text-zinc-300 truncate">{sketch.title || 'Untitled'}</span>
+                </div>
               </button>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2 shrink-0 bg-gradient-to-r from-transparent to-zinc-900">
                 <button onClick={(e) => { e.stopPropagation(); cloneSketchAsEpisode(sketch); }} className="hover:text-green-400 p-1.5" title="Duplicate as New Episode">
@@ -1612,7 +1684,7 @@ const App = () => {
             </div>
             )
           })}
-          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: [] }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW PROJECT</button>
+          <button onClick={() => { const id = Date.now().toString(); setSketches([...sketches, { id, isSeries: false, seriesTitle: '', title: 'New Project', genre: 'Comedy', tone: 'Absurdist', imageStyle: 'Pencil Sketch', aspectRatio: '16:9', seriesPremise: '', premise: '', characterProfiles: [], props: [], hook: '', escalation: '', ending: '', script: '', punchUpNotes: [] }]); setActiveSketchId(id); if(window.innerWidth < 768) setSidebarOpen(false); }} className="w-full mt-4 flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200"><Plus size={14} /> NEW PROJECT</button>
         </nav>
 
         <div className="border-t border-zinc-800 bg-zinc-950/50 flex flex-col">
@@ -1730,7 +1802,7 @@ const App = () => {
                   <div className="flex items-center gap-3 flex-1">
                     <button onClick={() => setSidebarOpen(true)} className="md:hidden text-zinc-400 hover:text-white shrink-0"><Menu size={24}/></button>
                     <div className="flex items-center gap-2 flex-1 font-black text-2xl md:text-4xl tracking-tighter truncate text-zinc-100">
-                      {activeSketch?.seriesTitle && (
+                      {activeSketch?.isSeries && activeSketch?.seriesTitle && (
                         <><span className="text-purple-500 truncate">{activeSketch.seriesTitle}</span> <span className="text-zinc-600">-</span></>
                       )}
                       <span className="truncate">{activeSketch?.title || 'Untitled'}</span>
@@ -1768,46 +1840,59 @@ const App = () => {
             {/* --- TAB: SCENE CONFIG --- */}
             {viewMode === 'scene' && (
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800 pb-4 gap-4">
                   <h2 className="text-xl md:text-2xl font-black uppercase tracking-tighter text-orange-500 flex items-center gap-2"><Settings2 size={24} /> Project Configuration</h2>
+                  <label className="flex items-center gap-2 cursor-pointer bg-zinc-900 px-4 py-2 rounded-xl border border-zinc-800 hover:border-zinc-600 transition-colors shadow-inner w-fit">
+                    <input 
+                      type="checkbox" 
+                      checked={activeSketch?.isSeries || false} 
+                      onChange={(e) => updateSketch(activeSketchId, 'isSeries', e.target.checked)} 
+                      className="accent-purple-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-zinc-300 uppercase tracking-widest">Series Format</span>
+                  </label>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
-                    <label className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center justify-between mb-2">
-                      <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Series Title</span>
-                    </label>
-                    <input value={activeSketch?.seriesTitle || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesTitle', e.target.value)} placeholder="Series Name..." className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 text-xl font-black focus:outline-none focus:border-purple-500/50 text-zinc-200" />
-                  </div>
+                <div className={`grid grid-cols-1 gap-4 ${activeSketch?.isSeries ? 'md:grid-cols-2' : ''}`}>
+                  {activeSketch?.isSeries && (
+                    <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative animate-in fade-in">
+                      <label className="text-[10px] font-black text-purple-500 uppercase tracking-widest flex items-center justify-between mb-2">
+                        <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Series Title</span>
+                      </label>
+                      <input value={activeSketch?.seriesTitle || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesTitle', e.target.value)} placeholder="Series Name..." className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 text-xl font-black focus:outline-none focus:border-purple-500/50 text-zinc-200" />
+                    </div>
+                  )}
                   <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
                     <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
-                      <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> Episode / Sketch Title</span>
+                      <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> {activeSketch?.isSeries ? 'Episode Title' : 'Sketch Title'}</span>
                     </label>
                     <input value={activeSketch?.title || ''} onChange={(e) => updateSketch(activeSketchId, 'title', e.target.value)} placeholder="Untitled Project..." className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 text-xl font-black focus:outline-none focus:border-orange-500/50 text-zinc-200" />
                   </div>
                 </div>
 
-                <div className="space-y-2 bg-zinc-900/20 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 border-dashed">
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between mb-2">
-                    <span className="flex items-center gap-2">Series Engine / Recurring Formula (Optional)</span>
-                    <div className="flex items-center gap-1.5">
-                      <button onClick={() => handleVoiceInput(activeSketch?.seriesPremise, (val) => updateSketch(activeSketchId, 'seriesPremise', val), 'seriesPremise')} className={`p-1.5 rounded transition-colors ${activeMicId === 'seriesPremise' ? 'bg-red-500/20 text-red-500 animate-pulse' : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
-                      {history[`sketch-seriesPremise`] !== undefined && (
-                        <button onClick={() => revertSketchField('seriesPremise')} className="p-1.5 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
-                      )}
-                      {aiMode === 'cowriter' && (
-                        <button onClick={() => generateNarrativeBeat('seriesPremise')} disabled={!isRealUser || isAIBusy} className="p-1.5 hover:bg-purple-500/20 rounded transition-colors disabled:opacity-50 text-purple-500 flex items-center gap-1 text-[9px]">
-                          {!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />} GENERATE
-                        </button>
-                      )}
-                    </div>
-                  </label>
-                  <textarea value={activeSketch?.seriesPremise || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesPremise', e.target.value)} placeholder="If this is part of a recurring series, describe the master formula here. (e.g. In every episode, two inept cops try to interrogate a completely innocent object.)" className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 md:p-6 text-sm focus:outline-none focus:border-zinc-500/50 min-h-[80px] resize-y text-zinc-400 italic" />
-                </div>
+                {activeSketch?.isSeries && (
+                  <div className="space-y-2 bg-zinc-900/20 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 border-dashed animate-in fade-in slide-in-from-top-4">
+                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-2">Series Engine / Recurring Formula</span>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => handleVoiceInput(activeSketch?.seriesPremise, (val) => updateSketch(activeSketchId, 'seriesPremise', val), 'seriesPremise')} className={`p-1.5 rounded transition-colors ${activeMicId === 'seriesPremise' ? 'bg-red-500/20 text-red-500 animate-pulse' : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
+                        {history[`sketch-seriesPremise`] !== undefined && (
+                          <button onClick={() => revertSketchField('seriesPremise')} className="p-1.5 hover:bg-zinc-800 rounded transition-colors text-zinc-500 hover:text-zinc-300" title="Undo AI edit"><Undo size={12}/></button>
+                        )}
+                        {aiMode === 'cowriter' && (
+                          <button onClick={() => generateNarrativeBeat('seriesPremise')} disabled={!isRealUser || isAIBusy} className="p-1.5 hover:bg-purple-500/20 rounded transition-colors disabled:opacity-50 text-purple-500 flex items-center gap-1 text-[9px]">
+                            {!isRealUser ? <Lock size={10} /> : <Sparkles size={10} />} GENERATE
+                          </button>
+                        )}
+                      </div>
+                    </label>
+                    <textarea value={activeSketch?.seriesPremise || ''} onChange={(e) => updateSketch(activeSketchId, 'seriesPremise', e.target.value)} placeholder="If this is part of a recurring series, describe the master formula here. (e.g. In every episode, two inept cops try to interrogate a completely innocent object.)" className="w-full bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 md:p-6 text-sm focus:outline-none focus:border-zinc-500/50 min-h-[80px] resize-y text-zinc-400 italic" />
+                  </div>
+                )}
 
                 <div className="space-y-2 bg-zinc-900/40 p-6 md:p-8 rounded-[2.5rem] border border-zinc-800/50 shadow-inner relative">
                   <label className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center justify-between mb-2">
-                    <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> The Episode Premise / Logline</span>
+                    <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> {activeSketch?.isSeries ? 'The Episode Premise' : 'The Premise / Logline'}</span>
                     <div className="flex items-center gap-1.5">
                       <button onClick={() => handleVoiceInput(activeSketch?.premise, (val) => updateSketch(activeSketchId, 'premise', val), 'premise')} className={`p-1.5 rounded transition-colors ${activeMicId === 'premise' ? 'bg-red-500/20 text-red-500 animate-pulse' : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`} title="Dictate"><Mic size={12}/></button>
                       {history[`sketch-premise`] !== undefined && (
@@ -2212,6 +2297,11 @@ const App = () => {
                   </div>
                   
                   <div className="flex gap-2 w-full sm:w-auto overflow-x-auto">
+                    {boardSubTab === 'grid' && activeShots.length > 0 && (
+                      <button onClick={downloadAllImagesAsZip} disabled={loadingStates.zip} className="flex-1 sm:flex-none flex items-center justify-center gap-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 rounded-full text-[10px] font-black transition-colors">
+                        {loadingStates.zip ? <Loader2 size={14} className="animate-spin"/> : <FolderArchive size={14}/>} ZIP IMAGES
+                      </button>
+                    )}
                     {boardSubTab === 'grid' && activeShots.length > 0 && (
                       <button onClick={clearAllShots} className="flex-1 sm:flex-none flex items-center justify-center gap-1 px-4 py-2 bg-red-900/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-900/50 rounded-full text-[10px] font-black transition-colors">
                         <Trash2 size={14}/> CLEAR BOARD
